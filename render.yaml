@@ -4,8 +4,10 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    preDeployCommand: alembic upgrade head
+    # preDeployCommand isn't available on the free plan — migrations run as
+    # part of the build instead (same effect: once per deploy, before the
+    # new process starts serving traffic).
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: DATABASE_URL
