@@ -38,6 +38,9 @@ dependencies:
   # State management, matching mobile/'s architecture (docs/architecture.md).
   flutter_riverpod: ^2.6.1
 
+  # Backend API client.
+  http: ^1.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -22,8 +22,8 @@ class BioPosApp extends StatelessWidget {
   }
 }
 
-/// Switches between merchant sign-in and the terminal based on the mock
-/// session state in features/merchant_auth/merchant_auth_providers.dart.
+/// Switches between merchant sign-in and the terminal based on the session
+/// state in features/merchant_auth/merchant_auth_providers.dart.
 class MerchantAuthGate extends ConsumerWidget {
   const MerchantAuthGate({super.key});
 

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_exception.dart';
+import '../../repositories/payment_requests_repository.dart';
 import '../merchant_auth/merchant_auth_providers.dart';
-import '../payment/payment_providers.dart';
 import '../payment/waiting_screen.dart';
 
-/// Merchant enters an amount and requests payment (PRD §32).
+/// Merchant enters an amount and opens a payment request (PRD §32) via
+/// POST /payments/request.
 class AmountEntryScreen extends ConsumerStatefulWidget {
   const AmountEntryScreen({super.key});
 
@@ -16,6 +18,7 @@ class AmountEntryScreen extends ConsumerStatefulWidget {
 class _AmountEntryScreenState extends ConsumerState<AmountEntryScreen> {
   final _formKey = GlobalKey<FormState>();
   final _amountController = TextEditingController();
+  bool _submitting = false;
 
   @override
   void dispose() {
@@ -23,13 +26,34 @@ class _AmountEntryScreenState extends ConsumerState<AmountEntryScreen> {
     super.dispose();
   }
 
-  void _requestPayment() {
+  Future<void> _requestPayment() async {
     if (!_formKey.currentState!.validate()) return;
-    final amount = double.parse(_amountController.text);
-    ref.read(paymentRequestProvider.notifier).create(amount);
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const WaitingScreen()))
-        .then((_) => _amountController.clear());
+    final merchantId = ref.read(merchantAuthProvider).merchantId;
+    if (merchantId == null) return;
+
+    setState(() => _submitting = true);
+    try {
+      final amount = double.parse(_amountController.text);
+      final request = await ref
+          .read(paymentRequestsRepositoryProvider)
+          .create(merchantId: merchantId, amount: amount);
+
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => WaitingScreen(initial: request)),
+      );
+      _amountController.clear();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Could not reach the BioFinance server')));
+    }
   }
 
   @override
@@ -80,9 +104,15 @@ class _AmountEntryScreenState extends ConsumerState<AmountEntryScreen> {
                 ),
                 const SizedBox(height: 24),
                 FilledButton.icon(
-                  onPressed: _requestPayment,
-                  icon: const Icon(Icons.fingerprint),
-                  label: const Text('Request Payment'),
+                  onPressed: _submitting ? null : _requestPayment,
+                  icon: _submitting
+                      ? const SizedBox(
+                          height: 16,
+                          width: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.fingerprint),
+                  label: Text(_submitting ? 'Creating request…' : 'Request Payment'),
                 ),
               ],
             ),

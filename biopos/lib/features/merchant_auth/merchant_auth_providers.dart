@@ -1,30 +1,61 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/errors/app_exception.dart';
+import '../../repositories/merchants_repository.dart';
+
 class MerchantSession {
-  const MerchantSession({required this.isSignedIn, this.businessName});
+  const MerchantSession({
+    this.isSignedIn = false,
+    this.isLoading = false,
+    this.error,
+    this.merchantId,
+    this.businessName,
+  });
 
   final bool isSignedIn;
+  final bool isLoading;
+  final String? error;
+  final String? merchantId;
   final String? businessName;
 
-  static const signedOut = MerchantSession(isSignedIn: false);
+  MerchantSession copyWith({bool? isLoading, String? error}) => MerchantSession(
+        isSignedIn: isSignedIn,
+        isLoading: isLoading ?? this.isLoading,
+        error: error,
+        merchantId: merchantId,
+        businessName: businessName,
+      );
 }
 
-/// Mock merchant sign-in — the backend has no merchant-auth endpoint yet
-/// (Merchant/MerchantDevice today are created/looked up unauthenticated;
-/// see docs/database-schema.md §"merchants"/"merchant_devices"). PRD §44
-/// lists "merchant authentication" as an MVP requirement, so the screen
-/// and state shape exist now; wiring to a real backend endpoint is
-/// follow-up work once one exists.
+/// Merchant "sign-in" is really just POST /merchants — there's no real
+/// merchant-auth endpoint yet (Merchant/MerchantDevice have no login;
+/// docs/roadmap.md Phase 5), so this creates a fresh Merchant row per
+/// sign-in rather than authenticating an existing one. Good enough to get
+/// a real merchant_id for payment requests; not real authentication.
 class MerchantAuthNotifier extends StateNotifier<MerchantSession> {
-  MerchantAuthNotifier() : super(MerchantSession.signedOut);
+  MerchantAuthNotifier(this._merchantsRepository) : super(const MerchantSession());
+
+  final MerchantsRepository _merchantsRepository;
 
   Future<void> signIn(String businessName) async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    state = MerchantSession(isSignedIn: true, businessName: businessName);
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      final merchant = await _merchantsRepository.create(businessName);
+      state = MerchantSession(
+        isSignedIn: true,
+        merchantId: merchant.id,
+        businessName: merchant.businessName,
+      );
+    } on ApiException catch (e) {
+      state = state.copyWith(isLoading: false, error: e.message);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: 'Could not reach the BioFinance server');
+    }
   }
 
-  void signOut() => state = MerchantSession.signedOut;
+  void signOut() => state = const MerchantSession();
 }
 
-final merchantAuthProvider =
-    StateNotifierProvider<MerchantAuthNotifier, MerchantSession>((ref) => MerchantAuthNotifier());
+final merchantAuthProvider = StateNotifierProvider<MerchantAuthNotifier, MerchantSession>(
+  (ref) => MerchantAuthNotifier(ref.watch(merchantsRepositoryProvider)),
+);

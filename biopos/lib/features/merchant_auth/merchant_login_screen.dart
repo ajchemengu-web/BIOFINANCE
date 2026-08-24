@@ -13,7 +13,6 @@ class MerchantLoginScreen extends ConsumerStatefulWidget {
 class _MerchantLoginScreenState extends ConsumerState<MerchantLoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _businessNameController = TextEditingController(text: 'Java House');
-  bool _submitting = false;
 
   @override
   void dispose() {
@@ -23,13 +22,13 @@ class _MerchantLoginScreenState extends ConsumerState<MerchantLoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _submitting = true);
     await ref.read(merchantAuthProvider.notifier).signIn(_businessNameController.text);
-    if (mounted) setState(() => _submitting = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final session = ref.watch(merchantAuthProvider);
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -65,8 +64,8 @@ class _MerchantLoginScreenState extends ConsumerState<MerchantLoginScreen> {
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
-                    onPressed: _submitting ? null : _submit,
-                    child: _submitting
+                    onPressed: session.isLoading ? null : _submit,
+                    child: session.isLoading
                         ? const SizedBox(
                             height: 20,
                             width: 20,
@@ -74,9 +73,17 @@ class _MerchantLoginScreenState extends ConsumerState<MerchantLoginScreen> {
                           )
                         : const Text('Sign in'),
                   ),
+                  if (session.error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      session.error!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(
-                    'Mock sign-in — no backend merchant-auth endpoint yet.',
+                    'Registers a merchant on sign-in — no real merchant login yet.',
                     style: Theme.of(context).textTheme.bodySmall,
                     textAlign: TextAlign.center,
                   ),

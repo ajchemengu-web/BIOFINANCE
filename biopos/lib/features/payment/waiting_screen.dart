@@ -1,91 +1,133 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/payment_request_result.dart';
+import '../../repositories/payment_requests_repository.dart';
 import '../receipt/receipt_screen.dart';
-import 'payment_providers.dart';
 
-/// "WAITING FOR CUSTOMER" (PRD §32). In a real deployment the customer
-/// authenticates on their own BioFinance app and this screen polls
-/// GET /payments/{id} for the result; there's no second device here, so
-/// the button below stands in for that (see payment_providers.dart).
+/// "WAITING FOR CUSTOMER" (PRD §32). Polls GET /payments/{id} until the
+/// customer claims and it resolves (or fails) on their own device — see
+/// backend/app/api/payments.py POST /payments/{id}/claim, called from
+/// mobile/, not from here.
 class WaitingScreen extends ConsumerStatefulWidget {
-  const WaitingScreen({super.key});
+  const WaitingScreen({super.key, required this.initial});
+
+  final PaymentRequestResult initial;
 
   @override
   ConsumerState<WaitingScreen> createState() => _WaitingScreenState();
 }
 
 class _WaitingScreenState extends ConsumerState<WaitingScreen> {
-  bool _processing = false;
+  static const _pollInterval = Duration(seconds: 2);
+  static const _slowThreshold = Duration(seconds: 30);
 
-  Future<void> _simulateCustomer() async {
-    setState(() => _processing = true);
-    await ref.read(paymentRequestProvider.notifier).simulateCustomerAuthentication();
+  late PaymentRequestResult _current;
+  Timer? _pollTimer;
+  bool _cancelling = false;
+  bool _showSlowNotice = false;
+  final _stopwatch = Stopwatch()..start();
+
+  @override
+  void initState() {
+    super.initState();
+    _current = widget.initial;
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _poll() async {
     if (!mounted) return;
-    setState(() => _processing = false);
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const ReceiptScreen()),
-    );
+    try {
+      final result =
+          await ref.read(paymentRequestsRepositoryProvider).getStatus(_current.id);
+      if (!mounted) return;
+      setState(() {
+        _current = result;
+        _showSlowNotice = _stopwatch.elapsed > _slowThreshold;
+      });
+      if (result.isTerminal) {
+        _pollTimer?.cancel();
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(builder: (_) => ReceiptScreen(result: result)),
+        );
+      }
+    } catch (_) {
+      // Transient network hiccup — the next poll will retry. Not surfaced
+      // to avoid flashing an error on every brief blip.
+    }
+  }
+
+  Future<void> _cancel() async {
+    setState(() => _cancelling = true);
+    _pollTimer?.cancel();
+    try {
+      await ref.read(paymentRequestsRepositoryProvider).cancel(_current.id);
+    } catch (_) {
+      // Best-effort — leaving the screen either way.
+    }
+    if (mounted) Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    final request = ref.watch(paymentRequestProvider);
-    if (request == null) {
-      // Reached directly (e.g. hot restart mid-flow) — nothing to show.
-      return Scaffold(body: Center(child: TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Back'))));
-    }
-
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'KSh ${request.amount.toStringAsFixed(2)}',
-                  style: Theme.of(context).textTheme.displayMedium,
-                ),
-                const SizedBox(height: 24),
-                const SizedBox(
-                  width: 64,
-                  height: 64,
-                  child: CircularProgressIndicator(strokeWidth: 3),
-                ),
-                const SizedBox(height: 24),
-                Text('WAITING FOR CUSTOMER', style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 4),
-                const Text('Authenticate with BioFinance'),
-                const SizedBox(height: 48),
-                FilledButton.icon(
-                  onPressed: _processing ? null : _simulateCustomer,
-                  icon: _processing
-                      ? const SizedBox(
-                          height: 16,
-                          width: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.fingerprint),
-                  label: Text(_processing ? 'Authorizing…' : 'Simulate Customer Authentication'),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'No second device in this demo — the real flow has the customer\n'
-                  'authenticate on their own BioFinance app.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () {
-                    ref.read(paymentRequestProvider.notifier).cancel();
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('Cancel'),
-                ),
-              ],
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'KSh ${_current.amount.toStringAsFixed(2)}',
+                    style: Theme.of(context).textTheme.displayMedium,
+                  ),
+                  const SizedBox(height: 24),
+                  const SizedBox(
+                    width: 64,
+                    height: 64,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                  const SizedBox(height: 24),
+                  Text('WAITING FOR CUSTOMER', style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 4),
+                  const Text('Authenticate with BioFinance'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Ref: ${_current.id}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  if (_showSlowNotice) ...[
+                    const SizedBox(height: 24),
+                    Text(
+                      'Still waiting — the customer may not have their app open.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                  const SizedBox(height: 48),
+                  TextButton(
+                    onPressed: _cancelling ? null : _cancel,
+                    child: _cancelling
+                        ? const SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Cancel'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

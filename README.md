@@ -18,7 +18,7 @@ Phases 0–3 done: architecture, a real PostgreSQL-backed API, BioRouter (primar
 
 Phase 4 (Daraja) is coded but **not yet verified against a real sandbox** — no Safaricom developer credentials were available to test against. `DarajaProvider` (STK push, status query, callback handling) is covered by tests against a mocked HTTP transport instead; MPESA payments automatically switch from the mock provider to real Daraja the moment `DARAJA_CONSUMER_KEY`/`SECRET`/`SHORTCODE` are set in `.env`. See [`docs/roadmap.md`](docs/roadmap.md) for what's needed to actually verify it (a Safaricom developer account + a public callback URL — sandbox rejects localhost).
 
-Phase 5 (BioPOS, `biopos/`) is scaffolded — merchant sign-in, amount entry, waiting-for-customer, and receipt screens. The backend gap this needed is now resolved: `POST /payments/request` lets a merchant open a payment request with no customer attached yet, and `POST /payments/{id}/claim` lets a customer (in their own `mobile/` session) fulfill it, routing through the same BioRouter path as a normal payment. `biopos/` itself still runs on local mock state, though — it isn't wired to call these endpoints yet. See [`docs/roadmap.md`](docs/roadmap.md) Phase 5 for what's left (wiring BioPOS, real merchant auth, a request/customer pairing mechanism).
+Phase 5 (BioPOS, `biopos/`) is wired end-to-end: merchant sign-in creates a real `Merchant`, amount entry opens a real payment request (`POST /payments/request`), and the waiting screen polls the real backend (`GET /payments/{id}`) until a customer claims it from their own `mobile/` session (`POST /payments/{id}/claim`) — same BioRouter path as a normal payment. What's still open: real merchant authentication (`POST /merchants` is unauthenticated and creates a fresh row per sign-in — no login exists yet) and a pairing mechanism binding a specific customer to a specific terminal's request. See [`docs/roadmap.md`](docs/roadmap.md) Phase 5.
 
 ## Backend — run locally
 
@@ -60,7 +60,9 @@ flutter pub get
 flutter run
 ```
 
-Local mock state only right now — no backend connection (see Status above). `flutter analyze` is clean; `flutter test` covers the full mock flow (sign in → request payment → simulate customer authentication → receipt → new transaction).
+Points at `http://localhost:8000/api/v1` by default (override with `--dart-define=API_BASE_URL=...`) — start the backend first.
+
+`flutter analyze` is clean. `flutter test` drives the real UI against the live backend: sign in creates a merchant, requesting a payment opens a real request, then — playing "a customer on their own device" via raw HTTP, since claiming is `mobile/`'s job, not BioPOS's — registers a customer, connects M-PESA, sets it as primary, and claims the request; confirms BioPOS's polling picks it up and shows the receipt. Same `runAsync` + `HttpOverrides.global = null` requirements as `mobile/`'s test, plus one more lesson this one surfaced: a plain `pump()` rebuilds the tree but doesn't advance the fake animation clock, so a `Navigator.push`'s page-transition needs an explicit `pump(duration)` too, or the new screen's `State` gets constructed but nothing can find its widgets yet.
 
 ## Deploying the backend to Render
 
