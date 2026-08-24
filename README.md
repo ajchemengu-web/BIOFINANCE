@@ -14,7 +14,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the full system design, [
 
 ## Status
 
-Phases 0–3 done (architecture, Flutter mock UI, real PostgreSQL-backed API, BioRouter with fallback + idempotency) — see [`docs/roadmap.md`](docs/roadmap.md) for the full checklist. Daraja itself (Phase 4), BioPOS (Phase 5), and wiring the Flutter app to the live backend instead of its Phase 1 mocks are what's left.
+Phases 0–3 done: architecture, a real PostgreSQL-backed API, BioRouter (primary/fallback routing, idempotency, transaction state machine), and a Flutter app wired end-to-end to that live backend (login, BioID, provider connect/disconnect, routing policy, balances, payments, transaction history all hit real endpoints — no more mock state). See [`docs/roadmap.md`](docs/roadmap.md) for the full checklist. What's left: Daraja itself (Phase 4, currently mock providers) and BioPOS (Phase 5, a separate merchant-facing app).
 
 ## Backend — run locally
 
@@ -42,7 +42,9 @@ flutter pub get
 flutter run
 ```
 
-`flutter analyze` and `flutter test` both pass on the current scaffold.
+Points at `http://localhost:8000/api/v1` by default (override with `--dart-define=API_BASE_URL=...`), so the backend needs to be running first — see above.
+
+`flutter analyze` is clean. `flutter test` runs two suites: a basic widget test with no backend dependency, and `payment_flow_test.dart`, which drives the real app (login → connect a provider → set routing policy → pay → view history) against the live backend over real HTTP — **start `uvicorn` first**, or this one fails with connection errors. It deliberately opts out of Flutter's test-network sandbox (`HttpOverrides.global = null`) and runs the whole flow inside one `tester.runAsync` block; see the comments in that file if you're extending it — mixing real async I/O with `flutter_test`'s fake clock is easy to get subtly wrong (multiple real network calls fired outside `runAsync`, or split across separate `runAsync` calls, just hang forever on the next `pumpAndSettle`).
 
 ## Deploying the backend to Render
 

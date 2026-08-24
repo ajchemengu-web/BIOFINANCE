@@ -8,3 +8,11 @@ class AppException implements Exception {
   @override
   String toString() => message;
 }
+
+/// Raised by ApiClient for any non-2xx response. Carries the HTTP status so
+/// callers can special-case things like 401 (session expired).
+class ApiException extends AppException {
+  const ApiException(this.statusCode, String message) : super(message);
+
+  final int statusCode;
+}

@@ -14,7 +14,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController(text: 'demo@biofinance.dev');
   final _passwordController = TextEditingController(text: 'password123');
-  bool _submitting = false;
 
   @override
   void dispose() {
@@ -25,13 +24,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    setState(() => _submitting = true);
     await ref.read(authProvider.notifier).login(_emailController.text, _passwordController.text);
-    if (mounted) setState(() => _submitting = false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final authState = ref.watch(authProvider);
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -73,8 +72,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
-                    onPressed: _submitting ? null : _submit,
-                    child: _submitting
+                    onPressed: authState.isLoading ? null : _submit,
+                    child: authState.isLoading
                         ? const SizedBox(
                             height: 20,
                             width: 20,
@@ -82,9 +81,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           )
                         : const Text('Log in'),
                   ),
+                  if (authState.error != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      authState.error!,
+                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(
-                    'Phase 1 mock login — no backend call yet.',
+                    'New emails are provisioned automatically on first login.',
                     style: Theme.of(context).textTheme.bodySmall,
                     textAlign: TextAlign.center,
                   ),

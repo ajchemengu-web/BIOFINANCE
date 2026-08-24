@@ -4,9 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/security/biometric_auth.dart';
 import 'payment_providers.dart';
 
-/// Mock end-to-end payment journey (PRD §42): amount entry → biometric
-/// authentication → mock BioRouter → result. No backend call yet — see
-/// payment_providers.dart for the mock routing/fallback logic.
+/// End-to-end payment journey (PRD §42): amount entry → biometric
+/// authentication → real BioRouter on the backend → result. See
+/// payment_providers.dart for the API call.
 class PayScreen extends ConsumerStatefulWidget {
   const PayScreen({super.key});
 
@@ -64,6 +64,11 @@ class _PayScreenState extends ConsumerState<PayScreen> {
     // still valid here) — the OK button pops both the dialog and this
     // screen, returning to the dashboard.
     final success = outcome.status == PaymentOutcomeStatus.success;
+    final title = switch (outcome.status) {
+      PaymentOutcomeStatus.success => 'PAYMENT SUCCESSFUL',
+      PaymentOutcomeStatus.declined => 'PAYMENT DECLINED',
+      PaymentOutcomeStatus.error => 'SOMETHING WENT WRONG',
+    };
     await showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
@@ -72,12 +77,12 @@ class _PayScreenState extends ConsumerState<PayScreen> {
           color: success ? Colors.green : Colors.red,
           size: 48,
         ),
-        title: Text(success ? 'PAYMENT SUCCESSFUL' : 'PAYMENT DECLINED'),
+        title: Text(title),
         content: Text(
           success
               ? 'KSh ${outcome.amount.toStringAsFixed(2)} to ${outcome.merchantName}'
-                  '${outcome.usedFallback ? '\n(routed via fallback provider)' : ''}'
-              : 'No connected provider had sufficient funds.',
+                  '${outcome.provider != null ? '\nvia ${outcome.provider}' : ''}'
+              : outcome.message ?? 'Payment could not be completed.',
         ),
         actions: [
           TextButton(

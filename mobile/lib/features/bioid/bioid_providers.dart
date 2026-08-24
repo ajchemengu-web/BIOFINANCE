@@ -1,7 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/bio_id.dart';
+import '../../repositories/bioid_repository.dart';
 import '../authentication/auth_providers.dart';
 
-/// Derives the current BioID display code from the mock session. Real
-/// GET /bioid call lands in Phase 2.
-final bioIdProvider = Provider<String?>((ref) => ref.watch(authProvider).bioIdCode);
+/// Fetches (or issues, on first login) the current user's BioID.
+/// Re-fetches whenever the session's authenticated status flips.
+final bioIdProvider = FutureProvider<BioId>((ref) {
+  ref.watch(authProvider.select((s) => s.isAuthenticated));
+  return ref.watch(bioIdRepositoryProvider).fetchOrIssue();
+});

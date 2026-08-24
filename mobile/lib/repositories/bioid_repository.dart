@@ -1,15 +1,23 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../core/networking/api_client.dart';
 import '../models/bio_id.dart';
 
-/// Talks to GET/POST /bioid. Implemented once the backend leaves stub state
-/// (Phase 2, docs/roadmap.md).
 class BioIdRepository {
-  BioIdRepository({ApiClient? apiClient}) : _apiClient = apiClient ?? ApiClient();
+  BioIdRepository(this._apiClient);
 
-  // ignore: unused_field
   final ApiClient _apiClient;
 
-  Future<BioId> fetchCurrent() {
-    throw UnimplementedError('BioIdRepository.fetchCurrent — implemented in Phase 2');
+  Future<BioId> fetchOrIssue() async {
+    try {
+      final json = await _apiClient.get('/bioid') as Map<String, dynamic>;
+      return BioId.fromJson(json);
+    } on Exception {
+      final json = await _apiClient.post('/bioid') as Map<String, dynamic>;
+      return BioId.fromJson(json);
+    }
   }
 }
+
+final bioIdRepositoryProvider =
+    Provider<BioIdRepository>((ref) => BioIdRepository(ref.watch(apiClientProvider)));

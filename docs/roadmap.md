@@ -23,8 +23,8 @@ Uses mock/local data via Riverpod — no backend calls yet. Verified: `flutter a
 - [x] Real `DATABASE_URL` provisioned (local PostgreSQL 17 via winget, superuser `postgres`/`postgres`)
 - [x] Alembic migrations applied against a live database
 - [x] Auth, BioID, Providers, Balances, Routing endpoints wired to and verified against real PostgreSQL (`backend/app/services/`)
-- [ ] Flutter → FastAPI → PostgreSQL wired end-to-end (mobile app still uses Phase 1 mock providers — the repositories/services stubs in `mobile/lib/repositories/` and `mobile/lib/services/` are the wiring point)
-- [ ] Hardcoded/mock financial data removed from the Flutter app
+- [x] Flutter → FastAPI → PostgreSQL wired end-to-end (`mobile/lib/repositories/`, real Riverpod `FutureProvider`/`AsyncNotifier`s replacing the Phase 1 mock state) — verified via `mobile/test/payment_flow_test.dart`, which drives the actual UI (login, connect a provider, set routing policy, pay, view history) against a live `uvicorn` + PostgreSQL backend over real HTTP
+- [x] Hardcoded/mock financial data removed from the Flutter app — dashboard, providers, routing, and transactions all read from the backend; only the payment-provider mock balances themselves are intentionally mock (Daraja replaces MPESA in Phase 4)
 
 ## Phase 3 — BioRouter
 - [x] Primary provider routing (`backend/app/services/router_service.py`)

@@ -1,35 +1,58 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../services/bioid_service.dart';
+import '../../core/errors/app_exception.dart';
+import '../../services/auth_service.dart';
 
 class AuthState {
-  const AuthState({required this.isAuthenticated, this.email, this.fullName, this.bioIdCode});
+  const AuthState({this.isAuthenticated = false, this.isLoading = false, this.error, this.email});
 
   final bool isAuthenticated;
+  final bool isLoading;
+  final String? error;
   final String? email;
-  final String? fullName;
-  final String? bioIdCode;
 
-  static const unauthenticated = AuthState(isAuthenticated: false);
+  AuthState copyWith({bool? isAuthenticated, bool? isLoading, String? error, String? email}) =>
+      AuthState(
+        isAuthenticated: isAuthenticated ?? this.isAuthenticated,
+        isLoading: isLoading ?? this.isLoading,
+        error: error,
+        email: email ?? this.email,
+      );
 }
 
-/// Mock session state for Phase 1. Real login/register calls the backend in
-/// Phase 2 (docs/roadmap.md); this notifier keeps the same public API
-/// (`login`/`logout`) so screens don't change when that lands.
+/// Session state backed by the real backend (POST /auth/login, falling back
+/// to /auth/register — see auth_service.dart). Screens watch this to decide
+/// between LoginScreen and HomeShell (main.dart's AuthGate).
 class AuthNotifier extends StateNotifier<AuthState> {
-  AuthNotifier() : super(AuthState.unauthenticated);
-
-  Future<void> login(String email, String password) async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    state = AuthState(
-      isAuthenticated: true,
-      email: email,
-      fullName: email.split('@').first,
-      bioIdCode: generateBioIdCode(),
-    );
+  AuthNotifier(this._authService) : super(const AuthState()) {
+    _restoreSession();
   }
 
-  void logout() => state = AuthState.unauthenticated;
+  final AuthService _authService;
+
+  Future<void> _restoreSession() async {
+    final token = await _authService.restoreSession();
+    if (token != null) state = state.copyWith(isAuthenticated: true);
+  }
+
+  Future<void> login(String email, String password) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      await _authService.loginOrRegister(email, password);
+      state = AuthState(isAuthenticated: true, email: email);
+    } on ApiException catch (e) {
+      state = state.copyWith(isLoading: false, error: e.message);
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: 'Could not reach the BioFinance server');
+    }
+  }
+
+  Future<void> logout() async {
+    await _authService.logout();
+    state = const AuthState();
+  }
 }
 
-final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) => AuthNotifier());
+final authProvider = StateNotifierProvider<AuthNotifier, AuthState>(
+  (ref) => AuthNotifier(ref.watch(authServiceProvider)),
+);
