@@ -7,7 +7,7 @@ venv/
 .env
 .pytest_cache/
 
-# Flutter / Dart
+# Flutter / Dart (mobile/ and biopos/)
 mobile/.dart_tool/
 mobile/.flutter-plugin-dependencies
 mobile/build/
@@ -17,6 +17,15 @@ mobile/*.iml
 mobile/android/.gradle/
 mobile/android/local.properties
 mobile/ios/Flutter/.last_build_id
+biopos/.dart_tool/
+biopos/.flutter-plugin-dependencies
+biopos/build/
+biopos/.pub-cache/
+biopos/.pub/
+biopos/*.iml
+biopos/android/.gradle/
+biopos/android/local.properties
+biopos/ios/Flutter/.last_build_id
 
 # Editors / OS
 .vscode/

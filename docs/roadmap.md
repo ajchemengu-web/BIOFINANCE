@@ -43,10 +43,14 @@ Uses mock/local data via Riverpod — no backend calls yet. Verified: `flutter a
 - [ ] `get_balance` — Daraja has no customer-balance API; BioWallet just won't show a balance for MPESA once Daraja replaces the mock (`balances.py` already handles this gracefully).
 
 ## Phase 5 — BioPOS
-- [ ] New Flutter app (merchant-facing) — not scaffolded yet, starts here
-- [ ] Merchant authentication
-- [ ] Payment request creation + status polling
-- [ ] Receipt screen
+- [x] New Flutter app (merchant-facing) — `biopos/`, feature-first layout matching `mobile/`
+- [x] Merchant authentication screen — mock only, see gap below
+- [x] Payment request creation + waiting-for-customer screen — mock only, see gap below
+- [x] Receipt screen
+- [ ] **Backend gap, not yet resolved**: `POST /payments` assumes the caller already has the *customer's* BioFinance session (it requires a customer bearer token and identifies the BioID from that token). BioPOS's actual job per PRD §32 is different — the merchant creates a payment request *before* any customer is identified, and the customer authenticates separately (their own device, or the same terminal) to fulfill it. That needs either:
+  - a new "payment request" concept the backend can create unauthenticated (merchant-only) and later attach a `bio_id` to once a customer authenticates against it, or
+  - `Transaction.bio_id` becoming nullable until claimed.
+  Nothing here is wired to the backend yet — `biopos/lib/features/payment/payment_providers.dart` is local mock state only, matching how `mobile/` started in Phase 1. A real merchant-auth endpoint (JWT scoped to `merchants`/`merchant_devices`, not `users`) doesn't exist yet either.
 
 ## Phase 6 — End-to-End Demonstration
 - [ ] Full path: customer biometric → BioID → BioRouter → Daraja → M-PESA → merchant confirmation → customer transaction history
