@@ -34,9 +34,13 @@ Uses mock/local data via Riverpod — no backend calls yet. Verified: `flutter a
 - [x] Verified end-to-end against real PostgreSQL — `backend/tests/test_payment_flow.py` (9/9 tests passing, incl. decline→fallback and idempotent replay)
 
 ## Phase 4 — Daraja Sandbox
-- [ ] `DarajaAdapter` implements `PaymentProvider` fully (auth, STK push, status, callback)
-- [ ] BioRouter → DarajaAdapter → Daraja Sandbox path working
-- [ ] Callback webhook treated as the authoritative state transition (not the initial request)
+- [x] `DarajaProvider` implements `PaymentProvider` (OAuth, STK push, status query) — `backend/app/providers/daraja.py`
+- [x] Callback webhook parses Safaricom's payload and treats it as the authoritative state transition — `POST /providers/daraja/callback`, `PaymentService.handle_daraja_callback`
+- [x] `registry.py` routes MPESA to `DarajaProvider` automatically once `DARAJA_CONSUMER_KEY`/`SECRET`/`SHORTCODE` are set, mock otherwise — no code change needed to switch over
+- [x] BioRouter no longer fires a fallback attempt while the primary is `PENDING` (an async provider's request in flight) — would otherwise double-send an STK prompt
+- [ ] **Not yet verified against the real sandbox** — no Safaricom developer account/credentials were available this session. Covered instead by `backend/tests/test_daraja_provider.py` (mocked HTTP, confirms request/response shapes match the published API) and `backend/tests/test_daraja_callback.py` (real DB, confirms the callback handler's state transitions). Get sandbox credentials at https://developer.safaricom.co.ke, set them in `.env`, set `DARAJA_CALLBACK_BASE_URL` to a public HTTPS URL (sandbox rejects localhost — needs a tunnel like ngrok, or the Render deployment), and re-run a real payment to confirm.
+- [ ] `refund_payment` — needs a `SecurityCredential` (initiator password encrypted with Safaricom's public certificate), a separate credential this app doesn't collect yet. Deliberately left unimplemented rather than guessed at.
+- [ ] `get_balance` — Daraja has no customer-balance API; BioWallet just won't show a balance for MPESA once Daraja replaces the mock (`balances.py` already handles this gracefully).
 
 ## Phase 5 — BioPOS
 - [ ] New Flutter app (merchant-facing) — not scaffolded yet, starts here

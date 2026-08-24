@@ -79,6 +79,7 @@ class PaymentService:
 
         transaction.status = "PROCESSING"
         succeeded = False
+        pending = False
         for connection, result in attempts:
             self.db.add(
                 PaymentAttempt(
@@ -91,12 +92,56 @@ class PaymentService:
             if result.status == "SUCCESS":
                 succeeded = True
                 transaction.selected_provider = connection.provider_code
+            elif result.status == "PENDING":
+                pending = True
+                transaction.selected_provider = connection.provider_code
 
         if succeeded:
             transaction.status = "COMPLETED"
             transaction.completed_at = datetime.now(timezone.utc)
+        elif pending:
+            # Async provider (Daraja) — the STK push reached the phone, but
+            # the real outcome only arrives via handle_daraja_callback below.
+            # Leaving it here rather than resolving now is the whole point
+            # of treating the callback as authoritative (PRD §31).
+            transaction.status = "AUTHORIZATION_PENDING"
         elif not attempts:
             transaction.status = "PROVIDER_UNAVAILABLE"
+        else:
+            transaction.status = "DECLINED"
+
+        await self.db.commit()
+        await self.db.refresh(transaction)
+        return transaction
+
+    async def handle_daraja_callback(self, checkout_request_id: str, result_code: int) -> Transaction | None:
+        """
+        Applies Safaricom's STK push callback as the authoritative outcome
+        for the matching payment attempt (PRD §31 — never assume the
+        initial request succeeded). Returns the updated transaction, or
+        None if the callback doesn't match anything BioFinance created
+        (e.g. a retry Safaricom sent for a request we already resolved).
+        """
+        attempt_result = await self.db.execute(
+            select(PaymentAttempt).where(PaymentAttempt.provider_reference == checkout_request_id)
+        )
+        attempt = attempt_result.scalar_one_or_none()
+        if attempt is None:
+            return None
+
+        transaction = await self.db.get(Transaction, attempt.transaction_id)
+        if transaction is None or transaction.status != "AUTHORIZATION_PENDING":
+            # Already resolved (e.g. a duplicate callback Safaricom retried)
+            # or in a state this shouldn't touch — leave both the attempt
+            # and the transaction exactly as they are.
+            return transaction
+
+        attempt.result = "SUCCESS" if result_code == 0 else "DECLINED"
+
+        if result_code == 0:
+            transaction.status = "COMPLETED"
+            transaction.selected_provider = attempt.provider_code
+            transaction.completed_at = datetime.now(timezone.utc)
         else:
             transaction.status = "DECLINED"
 

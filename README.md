@@ -14,7 +14,11 @@ See [`docs/architecture.md`](docs/architecture.md) for the full system design, [
 
 ## Status
 
-Phases 0–3 done: architecture, a real PostgreSQL-backed API, BioRouter (primary/fallback routing, idempotency, transaction state machine), and a Flutter app wired end-to-end to that live backend (login, BioID, provider connect/disconnect, routing policy, balances, payments, transaction history all hit real endpoints — no more mock state). See [`docs/roadmap.md`](docs/roadmap.md) for the full checklist. What's left: Daraja itself (Phase 4, currently mock providers) and BioPOS (Phase 5, a separate merchant-facing app).
+Phases 0–3 done: architecture, a real PostgreSQL-backed API, BioRouter (primary/fallback routing, idempotency, transaction state machine), and a Flutter app wired end-to-end to that live backend (login, BioID, provider connect/disconnect, routing policy, balances, payments, transaction history all hit real endpoints — no more mock state).
+
+Phase 4 (Daraja) is coded but **not yet verified against a real sandbox** — no Safaricom developer credentials were available to test against. `DarajaProvider` (STK push, status query, callback handling) is covered by tests against a mocked HTTP transport instead; MPESA payments automatically switch from the mock provider to real Daraja the moment `DARAJA_CONSUMER_KEY`/`SECRET`/`SHORTCODE` are set in `.env`. See [`docs/roadmap.md`](docs/roadmap.md) for the full checklist, including what's needed to actually verify it (a Safaricom developer account + a public callback URL — sandbox rejects localhost).
+
+What's left after that: BioPOS (Phase 5, a separate merchant-facing app, not yet started).
 
 ## Backend — run locally
 
@@ -30,9 +34,11 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-`GET http://localhost:8000/health` returns `{"status": "ok"}`. Run tests: `pytest` from `backend/` — 9 tests, including a full end-to-end flow (register → connect providers → route a payment → fall back on decline → idempotent replay → transaction history) against the real database.
+`GET http://localhost:8000/health` returns `{"status": "ok"}`. Run tests: `pytest` from `backend/` — 21 tests: a full end-to-end flow (register → connect providers → route a payment → fall back on decline → idempotent replay → transaction history) against the real database, the BioRouter fallback algorithm in isolation, the Daraja provider against a mocked HTTP transport (`respx`), and the Daraja callback handler against the real database.
 
-Note: `requirements.txt` pins `bcrypt<4.1` — `passlib` 1.7.4 (last released 2020) breaks against bcrypt 4.1+, which dropped the `__about__` attribute passlib's backend detection relies on.
+Notes:
+- `requirements.txt` pins `bcrypt<4.1` — `passlib` 1.7.4 (last released 2020) breaks against bcrypt 4.1+, which dropped the `__about__` attribute passlib's backend detection relies on.
+- The async DB engine uses `NullPool` (`backend/app/db/database.py`) rather than connection pooling — a pooled connection is bound to whichever event loop first used it, and this app has repeatedly ended up with more than one in play across test tooling (FastAPI's `TestClient`, pytest-asyncio). Correctness over pooling performance; revisit if connection-per-request overhead ever actually matters at this app's traffic level.
 
 ## Mobile — run locally
 

@@ -21,6 +21,8 @@ services:
         sync: false
       - key: DARAJA_ENVIRONMENT
         value: sandbox
+      - key: DARAJA_CALLBACK_BASE_URL
+        sync: false # set to this service's own public URL once deployed
 
 # databases:
 #   Uncomment once ready to provision Render's managed Postgres, then point

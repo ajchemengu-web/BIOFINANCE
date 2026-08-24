@@ -56,9 +56,9 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 ## Daraja
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/providers/daraja/callback` | Safaricom webhook — authoritative status update (§31) | stub — Phase 4 |
+| POST | `/providers/daraja/callback` | Safaricom webhook — authoritative status update (§31) | done, unauthenticated (Safaricom calls it directly) — not yet verified against a real sandbox callback, see `docs/roadmap.md` Phase 4 |
 
-All "done" endpoints are backed by real PostgreSQL via SQLAlchemy — see `backend/app/services/`. Provider balances/payments run against the in-memory mock providers (`backend/app/providers/registry.py`) until Daraja replaces MPESA in Phase 4.
+All "done" endpoints are backed by real PostgreSQL via SQLAlchemy — see `backend/app/services/`. MPESA payments route to the real `DarajaProvider` automatically once Daraja credentials are configured (`backend/app/providers/registry.py`); other providers, and MPESA without credentials configured, use the in-memory mock providers.
 
 ## Idempotency
 

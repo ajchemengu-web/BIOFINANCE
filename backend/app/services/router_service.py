@@ -47,7 +47,13 @@ class RouterService:
                 )
             )
             attempts.append((connection, result))
-            if result.status == "SUCCESS":
+            # SUCCESS: done. PENDING (async providers like Daraja — the STK
+            # push reached the phone, outcome arrives later via callback):
+            # also stop here rather than firing the fallback in parallel,
+            # which would double-charge or send two prompts for one
+            # request. Only a definite DECLINED/TIMEOUT/ERROR tries the
+            # next candidate.
+            if result.status in ("SUCCESS", "PENDING"):
                 break
 
         return attempts

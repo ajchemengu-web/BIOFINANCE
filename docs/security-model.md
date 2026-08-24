@@ -14,8 +14,9 @@
 
 ## Secrets
 
-- Daraja credentials (`DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_ENVIRONMENT`) live only in backend environment configuration (`.env`, or Render's environment variable dashboard in production). Never in Flutter source, never committed to git, never stored in PostgreSQL.
+- Daraja credentials (`DARAJA_CONSUMER_KEY`, `DARAJA_CONSUMER_SECRET`, `DARAJA_SHORTCODE`, `DARAJA_PASSKEY`, `DARAJA_ENVIRONMENT`, `DARAJA_CALLBACK_BASE_URL`) live only in backend environment configuration (`.env`, or Render's environment variable dashboard in production). Never in Flutter source, never committed to git, never stored in PostgreSQL.
 - `.env` is gitignored; `.env.example` documents the required keys with placeholder values only.
+- `POST /providers/daraja/callback` is deliberately unauthenticated — Safaricom calls it directly, with no BioFinance session to attach a bearer token to. It only ever *reads* a `CheckoutRequestID` we generated ourselves and applies a state transition to the matching transaction; it can't be used to create or target arbitrary transactions. Safaricom's IP allowlisting isn't implemented yet — worth adding before any production use.
 
 ## Device binding
 

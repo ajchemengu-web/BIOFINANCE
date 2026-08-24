@@ -18,6 +18,14 @@ class Settings(BaseSettings):
     daraja_shortcode: str = ""
     daraja_passkey: str = ""
     daraja_environment: str = "sandbox"
+    # Public HTTPS URL Safaricom calls back on completion (POST
+    # {daraja_callback_base_url}/api/v1/providers/daraja/callback). Sandbox
+    # rejects localhost — needs a tunnel (ngrok) or the Render deployment.
+    daraja_callback_base_url: str = ""
+
+    @property
+    def daraja_configured(self) -> bool:
+        return bool(self.daraja_consumer_key and self.daraja_consumer_secret and self.daraja_shortcode)
 
 
 @lru_cache

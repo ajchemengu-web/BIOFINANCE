@@ -25,7 +25,12 @@ async def get_balances(user: User = Depends(get_current_user), db: AsyncSession 
     balances: list[ProviderBalance] = []
     for connection, account in result.all():
         provider = get_provider(connection.provider_code)
-        balance = await provider.get_balance(account.external_account_ref)
+        try:
+            balance = await provider.get_balance(account.external_account_ref)
+        except NotImplementedError:
+            # Real Daraja has no customer-balance API (see providers/daraja.py)
+            # — omit it from the total rather than fail the whole response.
+            continue
         balances.append(ProviderBalance(provider_code=connection.provider_code, amount=balance.amount))
 
     total = sum((balance.amount for balance in balances), start=Decimal("0"))

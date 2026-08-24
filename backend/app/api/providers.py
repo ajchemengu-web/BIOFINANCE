@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.models.provider import ProviderAccount, ProviderConnection
 from app.models.user import User
 from app.schemas.providers import ProviderConnectionResponse, ProviderConnectRequest
+from app.services.payment_service import PaymentService
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 
@@ -54,5 +55,22 @@ async def disconnect_provider(
 
 
 @router.post("/daraja/callback")
-async def daraja_callback():
-    raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, "Implemented in Phase 4 (Daraja sandbox)")
+async def daraja_callback(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Safaricom's STK push result webhook — no BioFinance auth on this route,
+    Safaricom calls it directly. Body shape per the Daraja docs:
+    {"Body": {"stkCallback": {"CheckoutRequestID": ..., "ResultCode": ...}}}.
+    Always acknowledge with 200 + ResultCode 0 regardless of whether the
+    CheckoutRequestID matched anything on our side — Safaricom retries
+    undelivered callbacks, and a duplicate/unmatched one isn't an error on
+    our end, just a no-op.
+    """
+    body = await request.json()
+    callback = body.get("Body", {}).get("stkCallback", {})
+    checkout_request_id = callback.get("CheckoutRequestID")
+    result_code = callback.get("ResultCode")
+
+    if checkout_request_id is not None and result_code is not None:
+        await PaymentService(db).handle_daraja_callback(checkout_request_id, int(result_code))
+
+    return {"ResultCode": 0, "ResultDesc": "Accepted"}
