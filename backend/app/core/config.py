@@ -23,9 +23,19 @@ class Settings(BaseSettings):
     # rejects localhost — needs a tunnel (ngrok) or the Render deployment.
     daraja_callback_base_url: str = ""
 
+    # Comma-separated origins allowed to call this API from a browser (the
+    # Vercel-hosted mobile/ and biopos/ web builds). "*" is fine for this
+    # MVP demo stage but should narrow to real origins before anything
+    # beyond a demo touches this deployment.
+    cors_allowed_origins: str = "*"
+
     @property
     def daraja_configured(self) -> bool:
         return bool(self.daraja_consumer_key and self.daraja_consumer_secret and self.daraja_shortcode)
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
 
 
 @lru_cache

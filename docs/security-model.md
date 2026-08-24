@@ -18,6 +18,10 @@
 - `.env` is gitignored; `.env.example` documents the required keys with placeholder values only.
 - `POST /providers/daraja/callback` is deliberately unauthenticated — Safaricom calls it directly, with no BioFinance session to attach a bearer token to. It only ever *reads* a `CheckoutRequestID` we generated ourselves and applies a state transition to the matching transaction; it can't be used to create or target arbitrary transactions. Safaricom's IP allowlisting isn't implemented yet — worth adding before any production use.
 
+## CORS
+
+- `CORS_ALLOWED_ORIGINS` (`backend/app/main.py`, `backend/app/core/config.py`) defaults to `*` — needed so the Vercel-hosted `mobile/`/`biopos/` web builds can call the API cross-origin at all before their deployment URLs are known. `allow_credentials` is `False` (auth is a bearer token in the `Authorization` header, not cookies, so credentialed CORS mode isn't needed — and can't be combined with a wildcard origin regardless). Narrow `CORS_ALLOWED_ORIGINS` to the actual Vercel URL(s) once deployed — see README "Deploying" — a wildcard origin is a reasonable demo default, not a production one.
+
 ## Device binding
 
 - The `devices` table associates authorized devices with a user (`docs/database-schema.md`). Future hardening: hardware-backed key pair per device, cryptographic signature on transaction authorization instead of a bare "success" flag.

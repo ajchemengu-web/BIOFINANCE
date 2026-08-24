@@ -11,6 +11,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the full system design, [
 - **Database**: PostgreSQL (self-hosted or Render-managed — no Supabase/Firebase)
 - **First payment rail**: Safaricom Daraja 3.0 sandbox
 - **Backend hosting**: [Render](https://render.com) (`render.yaml`)
+- **Frontend hosting**: [Vercel](https://vercel.com) (`mobile/vercel.json`, `biopos/vercel.json`) — static Flutter web builds, each importable directly from this GitHub repo
 
 ## Status
 
@@ -64,12 +65,28 @@ Points at `http://localhost:8000/api/v1` by default (override with `--dart-defin
 
 `flutter analyze` is clean. `flutter test` drives the real UI against the live backend: sign in creates a merchant, requesting a payment opens a real request, then — playing "a customer on their own device" via raw HTTP, since claiming is `mobile/`'s job, not BioPOS's — registers a customer, connects M-PESA, sets it as primary, and claims the request; confirms BioPOS's polling picks it up and shows the receipt. Same `runAsync` + `HttpOverrides.global = null` requirements as `mobile/`'s test, plus one more lesson this one surfaced: a plain `pump()` rebuilds the tree but doesn't advance the fake animation clock, so a `Navigator.push`'s page-transition needs an explicit `pump(duration)` too, or the new screen's `State` gets constructed but nothing can find its widgets yet.
 
-## Deploying the backend to Render
+## Deploying — Render (backend) + Vercel (frontends)
 
-1. Repo is on GitHub at [github.com/ajchemengu-web/BIOFINANCE](https://github.com/ajchemengu-web/BIOFINANCE).
-2. In the Render dashboard, create a new Blueprint from `render.yaml`, or a Web Service pointed at `backend/` with build command `pip install -r requirements.txt` and start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
-3. Provision a Render Postgres instance and set `DATABASE_URL` on the web service to its connection string.
-4. Set the `DARAJA_*` environment variables from your Safaricom developer account (sandbox credentials to start), including `DARAJA_CALLBACK_BASE_URL` set to this service's own public URL.
+Backend needs a persistent process and a real Postgres connection, which is what Render is for; the two Flutter web builds are static output, which is what Vercel is for. Deploy in this order — the frontend needs the backend's URL, and (optionally) the backend needs the frontend's URL back for CORS.
+
+**1. Backend on Render**
+1. In the [Render dashboard](https://dashboard.render.com), create a new Blueprint from this repo — it'll pick up `render.yaml` automatically (Web Service rooted at `backend/`, build/pre-deploy/start commands, and the env var list already declared).
+2. Provision a Render Postgres instance (or use any other reachable Postgres) and set `DATABASE_URL` on the web service to its connection string. `preDeployCommand: alembic upgrade head` in `render.yaml` runs migrations automatically on every deploy.
+3. Leave `DARAJA_*` and `CORS_ALLOWED_ORIGINS` unset for now (defaults: Daraja mock provider, CORS wide open) — come back to them after steps 2 and 3 below.
+4. Note the service's URL, e.g. `https://biofinance-api.onrender.com` — the frontends need `<that URL>/api/v1` as `API_BASE_URL`.
+
+**2. Frontend(s) on Vercel** — repeat per app you want live (`mobile/`, `biopos/`, or both — each needs its own Vercel project since Vercel projects map to one root directory):
+1. In the [Vercel dashboard](https://vercel.com/new), import this GitHub repo.
+2. Set **Root Directory** to `mobile` (or `biopos`) — Vercel finds that folder's `vercel.json` (build command clones the Flutter SDK, since Vercel's build image doesn't have Flutter preinstalled — a standard pattern for this, not Vercel-specific tooling — then runs `flutter build web`).
+3. Set **Framework Preset** to "Other" — there's no `package.json` here for Vercel to auto-detect against.
+4. Add an environment variable **`API_BASE_URL`** = `https://<your-render-service>.onrender.com/api/v1` (from step 1.4). The build command reads this and bakes it into the web build via `--dart-define`.
+5. Deploy. Note the resulting `*.vercel.app` URL(s).
+
+**3. Back on Render** — tighten CORS now that you know the frontend URL(s): set `CORS_ALLOWED_ORIGINS` to a comma-separated list of your Vercel URLs (e.g. `https://biofinance-mobile.vercel.app,https://biofinance-biopos.vercel.app`) instead of leaving it at the default `*`.
+
+**4. Daraja** (optional, once you have Safaricom sandbox credentials): set `DARAJA_CONSUMER_KEY`/`SECRET`/`SHORTCODE`/`PASSKEY` and `DARAJA_CALLBACK_BASE_URL` to the Render service's own URL from step 1.4 — MPESA payments switch from the mock provider to real Daraja automatically, no redeploy-time code change needed.
+
+None of this has actually been deployed yet — the config above (`render.yaml`, `mobile/vercel.json`, `biopos/vercel.json`) is prepared and ready to import, but importing/provisioning happens in your own Render and Vercel accounts.
 
 ## Not in MVP scope
 

@@ -27,6 +27,9 @@ biopos/android/.gradle/
 biopos/android/local.properties
 biopos/ios/Flutter/.last_build_id
 
+# Vercel
+.vercel/
+
 # Editors / OS
 .vscode/
 .idea/
