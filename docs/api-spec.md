@@ -37,8 +37,10 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 ## Payments
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/payments` | create a payment via BioRouter (requires `Idempotency-Key`) | done |
-| GET | `/payments/{id}` | payment status | done |
+| POST | `/payments` | customer-initiated (`mobile/`): create + route a payment via BioRouter, authenticated, requires `Idempotency-Key` | done |
+| POST | `/payments/request` | merchant-initiated (`biopos/`): open a payment request with no customer yet, unauthenticated (no merchant-auth endpoint exists — see `docs/roadmap.md` Phase 5), requires `Idempotency-Key` | done |
+| POST | `/payments/{id}/claim` | a customer, authenticated in their own session, fulfills a merchant's request — attaches their BioID and routes it | done |
+| GET | `/payments/{id}` | payment/request status — unauthenticated on purpose, so `biopos/` can poll it | done |
 | POST | `/payments/{id}/cancel` | cancel a pending payment | done |
 
 ## Transactions
@@ -62,8 +64,8 @@ All "done" endpoints are backed by real PostgreSQL via SQLAlchemy — see `backe
 
 ## Idempotency
 
-Every `POST /payments` must include a client-generated idempotency key (header `Idempotency-Key`, e.g. `TX-20260824-000001`). A repeated request with the same key returns the existing transaction rather than creating a new one (§28).
+Every `POST /payments` and `POST /payments/request` must include a client-generated idempotency key (header `Idempotency-Key`, e.g. `TX-20260824-000001`). A repeated request with the same key returns the existing transaction rather than creating a new one (§28).
 
 ## Errors
 
-Standard FastAPI validation errors (422) for bad input. Domain errors return a JSON body `{"error": "<code>", "message": "<human readable>"}` with an appropriate 4xx/5xx status — the exact error-code table gets filled in as each service is implemented (Phase 2+).
+Standard FastAPI validation errors (422) for bad input. Domain errors return FastAPI's default shape, `{"detail": "<human readable message>"}`, with an appropriate 4xx status — e.g. `POST /payments/{id}/claim` returns 404 if the request doesn't exist, 409 if it's already been claimed or isn't awaiting a customer.

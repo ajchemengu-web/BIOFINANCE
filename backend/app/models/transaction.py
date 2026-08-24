@@ -13,7 +13,11 @@ from app.models.mixins import CreatedAtMixin, UUIDPrimaryKeyMixin, UpdatedAtMixi
 class Transaction(Base, UUIDPrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin):
     __tablename__ = "transactions"
 
-    bio_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("bio_ids.id"))
+    # Null until claimed — merchant-initiated requests (biopos/) have no
+    # customer identified yet when the row is created. See payment_service.py.
+    bio_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("bio_ids.id"), nullable=True
+    )
     merchant_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("merchants.id"))
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     currency: Mapped[str] = mapped_column(String, default="KES")

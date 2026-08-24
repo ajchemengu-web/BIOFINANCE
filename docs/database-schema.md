@@ -91,7 +91,7 @@ Only registered merchant devices may initiate production payment requests (§33)
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |
-| bio_id | uuid, fk → bio_ids | |
+| bio_id | uuid, fk → bio_ids, **nullable** | null until claimed — BioPOS-created requests (§32) have no customer yet; `POST /payments/{id}/claim` attaches one |
 | merchant_id | uuid, fk → merchants | |
 | amount | numeric(14,2) | |
 | currency | text | `KES` |
@@ -154,4 +154,10 @@ CREATED → AUTHENTICATION_PENDING → AUTHENTICATED → ROUTING
 ```
 Failure states: `AUTHENTICATION_FAILED`, `DECLINED`, `INSUFFICIENT_FUNDS`, `PROVIDER_UNAVAILABLE`, `TIMEOUT`, `CANCELLED`, `FAILED`, `REVERSED`, `REFUNDED`.
 
-Migrations are managed with Alembic (`backend/app/db/migrations/`). The first revision creates all tables above.
+Two entry points, per PRD §42/§32:
+- **Customer-initiated** (`mobile/`, `PaymentService.create_payment`): the customer's own app has already run biometric auth client-side before calling `POST /payments`, so the row is created with `bio_id` set and jumps straight to `AUTHENTICATED`.
+- **Merchant-initiated** (`biopos/`, `PaymentService.create_payment_request` + `claim_payment_request`): the merchant terminal has no customer to attach yet, so the row is created with `bio_id = NULL` and sits in `AUTHENTICATION_PENDING` until `POST /payments/{id}/claim` (called from the claiming customer's own session) attaches a `bio_id` and transitions it to `AUTHENTICATED`. Both paths converge from there — same routing, same state machine onward.
+
+`AUTHORIZATION_PENDING` also covers an async provider's in-flight request (Daraja's STK push — see `docs/architecture.md`): the transaction stays there until the callback webhook resolves it, not resolved synchronously like the mock providers.
+
+Migrations are managed with Alembic (`backend/app/db/migrations/`) — `0001` creates all tables above, `0002` makes `transactions.bio_id` nullable for the merchant-initiated path.

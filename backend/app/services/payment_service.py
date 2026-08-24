@@ -1,5 +1,18 @@
 """Payment lifecycle: idempotency, routing, and the transaction state machine
-(docs/database-schema.md)."""
+(docs/database-schema.md).
+
+Two ways a Transaction gets created, per the two apps that create them:
+- create_payment (mobile/, the customer's own app): the customer has
+  already authenticated client-side by the time this is called, so the
+  transaction goes straight to AUTHENTICATED and routes immediately.
+- create_payment_request + claim_payment_request (biopos/, the merchant
+  terminal): the merchant creates a request with no bio_id yet (nobody's
+  authenticated) — it sits in AUTHENTICATION_PENDING until a customer
+  claims it via their own session, at which point claim_payment_request
+  attaches their bio_id and routes it the same way.
+Both paths converge on _route_and_resolve so BioRouter behaves identically
+regardless of which app originated the transaction.
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -30,17 +43,11 @@ class PaymentService:
         currency: str,
         idempotency_key: str,
     ) -> Transaction:
-        existing = await self.db.execute(
-            select(Transaction).where(Transaction.idempotency_key == idempotency_key)
-        )
-        existing_transaction = existing.scalar_one_or_none()
-        if existing_transaction is not None:
-            return existing_transaction
+        existing = await self._find_by_idempotency_key(idempotency_key)
+        if existing is not None:
+            return existing
 
-        bio_id_result = await self.db.execute(select(BioID).where(BioID.user_id == user_id))
-        bio_id = bio_id_result.scalar_one_or_none()
-        if bio_id is None:
-            raise ValueError("User has no BioID issued")
+        bio_id = await self._require_bio_id(user_id)
 
         transaction = Transaction(
             bio_id=bio_id.id,
@@ -53,6 +60,61 @@ class PaymentService:
         self.db.add(transaction)
         await self.db.flush()
 
+        return await self._route_and_resolve(transaction, user_id)
+
+    async def create_payment_request(
+        self,
+        merchant_id: uuid.UUID,
+        amount: Decimal,
+        currency: str,
+        idempotency_key: str,
+    ) -> Transaction:
+        """
+        Merchant-initiated (biopos/) — no customer identified yet, so
+        bio_id is null until claim_payment_request attaches one. Nothing
+        to route yet either, since there's no routing policy without a
+        user.
+        """
+        existing = await self._find_by_idempotency_key(idempotency_key)
+        if existing is not None:
+            return existing
+
+        transaction = Transaction(
+            bio_id=None,
+            merchant_id=merchant_id,
+            amount=amount,
+            currency=currency,
+            status="AUTHENTICATION_PENDING",
+            idempotency_key=idempotency_key,
+        )
+        self.db.add(transaction)
+        await self.db.commit()
+        await self.db.refresh(transaction)
+        return transaction
+
+    async def claim_payment_request(self, transaction_id: uuid.UUID, user_id: uuid.UUID) -> Transaction:
+        """
+        A customer, authenticated in their own session, fulfills a
+        merchant-created request (POST /payments/{id}/claim). Whoever
+        claims a given request first gets it — there's no pairing
+        mechanism (QR code, proximity, merchant confirmation) yet binding
+        a specific customer to a specific merchant terminal; see
+        docs/security-model.md for this MVP-scope limitation.
+        """
+        transaction = await self.db.get(Transaction, transaction_id)
+        if transaction is None:
+            raise LookupError("Payment request not found")
+        if transaction.status != "AUTHENTICATION_PENDING" or transaction.bio_id is not None:
+            raise ValueError("Payment request is not awaiting a customer")
+
+        bio_id = await self._require_bio_id(user_id)
+        transaction.bio_id = bio_id.id
+        transaction.status = "AUTHENTICATED"
+        await self.db.flush()
+
+        return await self._route_and_resolve(transaction, user_id)
+
+    async def _route_and_resolve(self, transaction: Transaction, user_id: uuid.UUID) -> Transaction:
         policy_result = await self.db.execute(
             select(RoutingPolicy).where(RoutingPolicy.user_id == user_id)
         )
@@ -72,8 +134,8 @@ class PaymentService:
             policy,
             connections_by_id,
             account_ref_by_connection_id,
-            amount,
-            currency,
+            transaction.amount,
+            transaction.currency,
             str(transaction.id),
         )
 
@@ -148,6 +210,19 @@ class PaymentService:
         await self.db.commit()
         await self.db.refresh(transaction)
         return transaction
+
+    async def _find_by_idempotency_key(self, idempotency_key: str) -> Transaction | None:
+        existing = await self.db.execute(
+            select(Transaction).where(Transaction.idempotency_key == idempotency_key)
+        )
+        return existing.scalar_one_or_none()
+
+    async def _require_bio_id(self, user_id: uuid.UUID) -> BioID:
+        bio_id_result = await self.db.execute(select(BioID).where(BioID.user_id == user_id))
+        bio_id = bio_id_result.scalar_one_or_none()
+        if bio_id is None:
+            raise ValueError("User has no BioID issued")
+        return bio_id
 
     async def _load_candidates(self, policy: RoutingPolicy) -> tuple[dict, dict]:
         connection_ids = [

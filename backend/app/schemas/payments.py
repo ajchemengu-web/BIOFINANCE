@@ -10,6 +10,15 @@ class PaymentCreateRequest(BaseModel):
     currency: str = "KES"
 
 
+class PaymentRequestCreate(BaseModel):
+    """Merchant-initiated (biopos/) — no customer session, so no user/BioID
+    here; POST /payments/{id}/claim attaches one once a customer authenticates."""
+
+    merchant_id: uuid.UUID
+    amount: Decimal
+    currency: str = "KES"
+
+
 class PaymentResponse(BaseModel):
     id: uuid.UUID
     status: str

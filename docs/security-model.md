@@ -24,7 +24,8 @@
 
 ## Merchant-side integrity
 
-- Only devices registered in `merchant_devices` may initiate production payment requests (§33 of the source PRD) — an unregistered device cannot pose as a merchant terminal.
+- Only devices registered in `merchant_devices` may initiate production payment requests (§33 of the source PRD) — an unregistered device cannot pose as a merchant terminal. **Not enforced yet**: `POST /payments/request` doesn't check `merchant_devices` at all today (there's no merchant-auth endpoint to check it against — see `docs/roadmap.md` Phase 5); anyone can currently open a payment request against any merchant ID.
+- `POST /payments/{id}/claim`: whoever calls it first, with a valid customer session, claims that request — there's no pairing mechanism (QR code, proximity check, merchant-side confirmation) binding a specific customer to a specific merchant terminal's specific request. Acceptable for an MVP demo where the request ID isn't guessable and isn't exposed anywhere public; not acceptable before production use — a real deployment needs some way for the terminal to prove *this* request is the one the customer in front of it is claiming.
 
 ## Fraud protection (MVP scope)
 

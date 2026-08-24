@@ -18,7 +18,7 @@ Phases 0–3 done: architecture, a real PostgreSQL-backed API, BioRouter (primar
 
 Phase 4 (Daraja) is coded but **not yet verified against a real sandbox** — no Safaricom developer credentials were available to test against. `DarajaProvider` (STK push, status query, callback handling) is covered by tests against a mocked HTTP transport instead; MPESA payments automatically switch from the mock provider to real Daraja the moment `DARAJA_CONSUMER_KEY`/`SECRET`/`SHORTCODE` are set in `.env`. See [`docs/roadmap.md`](docs/roadmap.md) for what's needed to actually verify it (a Safaricom developer account + a public callback URL — sandbox rejects localhost).
 
-Phase 5 (BioPOS, `biopos/`) is scaffolded — merchant sign-in, amount entry, waiting-for-customer, and receipt screens — but runs on local mock state only, same as `mobile/` did before its Phase 2. It isn't wired to the backend because the backend doesn't have the right shape for it yet: `POST /payments` assumes the caller already holds the *customer's* session, but BioPOS's actual job is to create a payment request before any customer is identified. See [`docs/roadmap.md`](docs/roadmap.md) Phase 5 for the backend change this needs.
+Phase 5 (BioPOS, `biopos/`) is scaffolded — merchant sign-in, amount entry, waiting-for-customer, and receipt screens. The backend gap this needed is now resolved: `POST /payments/request` lets a merchant open a payment request with no customer attached yet, and `POST /payments/{id}/claim` lets a customer (in their own `mobile/` session) fulfill it, routing through the same BioRouter path as a normal payment. `biopos/` itself still runs on local mock state, though — it isn't wired to call these endpoints yet. See [`docs/roadmap.md`](docs/roadmap.md) Phase 5 for what's left (wiring BioPOS, real merchant auth, a request/customer pairing mechanism).
 
 ## Backend — run locally
 
@@ -34,7 +34,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-`GET http://localhost:8000/health` returns `{"status": "ok"}`. Run tests: `pytest` from `backend/` — 21 tests: a full end-to-end flow (register → connect providers → route a payment → fall back on decline → idempotent replay → transaction history) against the real database, the BioRouter fallback algorithm in isolation, the Daraja provider against a mocked HTTP transport (`respx`), and the Daraja callback handler against the real database.
+`GET http://localhost:8000/health` returns `{"status": "ok"}`. Run tests: `pytest` from `backend/` — 28 tests: the customer-initiated payment flow end-to-end (register → connect providers → route a payment → fall back on decline → idempotent replay → transaction history), the merchant-initiated flow (open a request → claim it → routes the same way → double-claim rejected), the BioRouter fallback algorithm in isolation, the Daraja provider against a mocked HTTP transport (`respx`), and the Daraja callback handler — all against the real database except the mocked-transport one.
 
 Notes:
 - `requirements.txt` pins `bcrypt<4.1` — `passlib` 1.7.4 (last released 2020) breaks against bcrypt 4.1+, which dropped the `__about__` attribute passlib's backend detection relies on.
