@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: biofinance-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false # set from the Render Postgres instance's connection string
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DARAJA_CONSUMER_KEY
+        sync: false
+      - key: DARAJA_CONSUMER_SECRET
+        sync: false
+      - key: DARAJA_SHORTCODE
+        sync: false
+      - key: DARAJA_PASSKEY
+        sync: false
+      - key: DARAJA_ENVIRONMENT
+        value: sandbox
+
+# databases:
+#   Uncomment once ready to provision Render's managed Postgres, then point
+#   DATABASE_URL above at its connection string.
+#   - name: biofinance-db
+#     plan: free
