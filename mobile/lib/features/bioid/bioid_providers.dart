@@ -1,4 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Holds the current user's BioID. Wired to the backend in Phase 2.
-final bioIdProvider = StateProvider<Object?>((ref) => null);
+import '../authentication/auth_providers.dart';
+
+/// Derives the current BioID display code from the mock session. Real
+/// GET /bioid call lands in Phase 2.
+final bioIdProvider = Provider<String?>((ref) => ref.watch(authProvider).bioIdCode);

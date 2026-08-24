@@ -3,6 +3,10 @@ import uuid
 from pydantic import BaseModel
 
 
+class MerchantCreateRequest(BaseModel):
+    business_name: str
+
+
 class MerchantResponse(BaseModel):
     id: uuid.UUID
     business_name: str

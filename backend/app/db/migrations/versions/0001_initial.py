@@ -117,6 +117,9 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
     )
+    # completed_at above must be timezone=True — payment_service.py stamps it with
+    # datetime.now(timezone.utc); asyncpg rejects offset-aware values against a
+    # naive TIMESTAMP column ("can't subtract offset-naive and offset-aware datetimes").
 
     op.create_table(
         "payment_attempts",

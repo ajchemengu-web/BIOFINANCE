@@ -14,22 +14,25 @@ See [`docs/architecture.md`](docs/architecture.md) for the full system design, [
 
 ## Status
 
-Phase 0 (architecture + scaffold) — see [`docs/roadmap.md`](docs/roadmap.md). Most API endpoints currently return `501 Not Implemented` with a note on which phase implements them; the routing, models, and provider-abstraction skeleton are in place and tested.
+Phases 0–3 done (architecture, Flutter mock UI, real PostgreSQL-backed API, BioRouter with fallback + idempotency) — see [`docs/roadmap.md`](docs/roadmap.md) for the full checklist. Daraja itself (Phase 4), BioPOS (Phase 5), and wiring the Flutter app to the live backend instead of its Phase 1 mocks are what's left.
 
 ## Backend — run locally
+
+PostgreSQL 17 is installed locally (via `winget install PostgreSQL.PostgreSQL.17`) with superuser `postgres` / password `postgres`, database `biofinance`.
 
 ```bash
 cd backend
 python -m venv .venv
 .venv/Scripts/activate        # .venv\Scripts\Activate.ps1 on PowerShell
 pip install -r requirements.txt
-cp .env.example .env          # fill in DATABASE_URL once you have a Postgres instance
+cp .env.example .env          # already points at postgres:postgres@localhost:5432/biofinance
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-`GET http://localhost:8000/health` should return `{"status": "ok"}` — this works without a real database. `alembic upgrade head` requires a real `DATABASE_URL` in `.env` (Render Postgres or a local instance) and hasn't been run yet in this repo.
+`GET http://localhost:8000/health` returns `{"status": "ok"}`. Run tests: `pytest` from `backend/` — 9 tests, including a full end-to-end flow (register → connect providers → route a payment → fall back on decline → idempotent replay → transaction history) against the real database.
 
-Run tests: `pytest` from `backend/`.
+Note: `requirements.txt` pins `bcrypt<4.1` — `passlib` 1.7.4 (last released 2020) breaks against bcrypt 4.1+, which dropped the `__about__` attribute passlib's backend detection relies on.
 
 ## Mobile — run locally
 

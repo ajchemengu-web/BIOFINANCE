@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'features/authentication/auth_providers.dart';
+import 'features/authentication/login_screen.dart';
+import 'features/dashboard/home_shell.dart';
+
 void main() {
   runApp(const ProviderScope(child: BioFinanceApp()));
 }
@@ -13,30 +17,19 @@ class BioFinanceApp extends StatelessWidget {
     return MaterialApp(
       title: 'BioFinance',
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
-      home: const DashboardPlaceholder(),
+      home: const AuthGate(),
     );
   }
 }
 
-/// Placeholder home screen. Real BioWallet dashboard (balances by provider,
-/// total across connected accounts) is built out in Phase 1 — see
-/// docs/roadmap.md and PRD §20.
-class DashboardPlaceholder extends StatelessWidget {
-  const DashboardPlaceholder({super.key});
+/// Switches between the login screen and the authenticated app shell based
+/// on the mock session state in features/authentication/auth_providers.dart.
+class AuthGate extends ConsumerWidget {
+  const AuthGate({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('BioFinance')),
-      body: const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Phase 0 scaffold.\nDashboard, BioID, and payment flows land in Phase 1.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ),
-    );
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isAuthenticated = ref.watch(authProvider.select((state) => state.isAuthenticated));
+    return isAuthenticated ? const HomeShell() : const LoginScreen();
   }
 }

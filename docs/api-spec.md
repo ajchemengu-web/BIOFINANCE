@@ -5,52 +5,60 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 ## Auth
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/auth/register` | create user + issue BioID | stub |
-| POST | `/auth/login` | issue access + refresh token | stub |
-| POST | `/auth/refresh` | rotate access token | stub |
+| POST | `/auth/register` | create user + issue BioID | done |
+| POST | `/auth/login` | issue access + refresh token | done |
+| POST | `/auth/refresh` | rotate access token | done |
 
 ## BioID
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/bioid` | issue a BioID for the current user | stub |
-| GET | `/bioid` | fetch current user's BioID | stub |
-| POST | `/bioid/lock` | lock the BioID (fraud/lost device) | stub |
+| POST | `/bioid` | issue a BioID for the current user (idempotent) | done |
+| GET | `/bioid` | fetch current user's BioID | done |
+| POST | `/bioid/lock` | lock the BioID (fraud/lost device) | done |
 
 ## Providers
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| GET | `/providers` | list connected providers | stub |
-| POST | `/providers/connect` | connect a provider (real or mock) | stub |
-| DELETE | `/providers/{id}` | disconnect a provider | stub |
+| GET | `/providers` | list connected providers | done |
+| POST | `/providers/connect` | connect a provider (real or mock) | done |
+| DELETE | `/providers/{id}` | disconnect a provider | done |
 
 ## Balances
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| GET | `/balances` | aggregated balance across connected providers | stub |
+| GET | `/balances` | aggregated balance across connected providers | done |
 
 ## Routing
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| GET | `/routing-policy` | current routing policy | stub |
-| PUT | `/routing-policy` | update mode / primary / fallback | stub |
+| GET | `/routing-policy` | current routing policy (creates a default on first read) | done |
+| PUT | `/routing-policy` | update mode / primary / fallback | done |
 
 ## Payments
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/payments` | create a payment (requires `Idempotency-Key`) | stub |
-| GET | `/payments/{id}` | payment status | stub |
-| POST | `/payments/{id}/cancel` | cancel a pending payment | stub |
+| POST | `/payments` | create a payment via BioRouter (requires `Idempotency-Key`) | done |
+| GET | `/payments/{id}` | payment status | done |
+| POST | `/payments/{id}/cancel` | cancel a pending payment | done |
 
 ## Transactions
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| GET | `/transactions` | list transaction history | stub |
-| GET | `/transactions/{id}` | transaction detail incl. payment attempts | stub |
+| GET | `/transactions` | list transaction history incl. payment attempts | done |
+| GET | `/transactions/{id}` | transaction detail incl. payment attempts | done |
+
+## Merchants
+| Method | Path | Purpose | Status |
+|---|---|---|---|
+| POST | `/merchants` | register a merchant (not in original PRD spec — added so payments have something real to target before BioPOS exists in Phase 5) | done |
+| GET | `/merchants/{id}` | merchant detail | done |
 
 ## Daraja
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/providers/daraja/callback` | Safaricom webhook — authoritative status update (§31) | stub |
+| POST | `/providers/daraja/callback` | Safaricom webhook — authoritative status update (§31) | stub — Phase 4 |
+
+All "done" endpoints are backed by real PostgreSQL via SQLAlchemy — see `backend/app/services/`. Provider balances/payments run against the in-memory mock providers (`backend/app/providers/registry.py`) until Daraja replaces MPESA in Phase 4.
 
 ## Idempotency
 
