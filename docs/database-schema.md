@@ -33,7 +33,7 @@ Devices authorized to authenticate on behalf of a user (device binding, §37). W
 | user_id | uuid, fk → users | |
 | device_identifier | text | |
 | public_key | text | for hardware-backed signature verification, future use |
-| push_token | text, nullable | FCM registration token; opaque, cleared on logout/device removal — set by `POST /devices/register`, not yet consumed by anything (push sending is still planned) |
+| push_token | text, nullable | FCM registration token; opaque, cleared on logout/device removal — set by `POST /devices/register`, read by `app/services/push_service.py` for BioFinance ID push pairing |
 | platform | text, nullable | `ANDROID`, `IOS`, `WEB` — set by `POST /devices/register` |
 | status | text | `ACTIVE`, `REVOKED` |
 | created_at | timestamptz | |
@@ -171,7 +171,7 @@ Failure states: `AUTHENTICATION_FAILED`, `DECLINED`, `INSUFFICIENT_FUNDS`, `PROV
 Two entry points, per PRD §42/§32:
 - **Customer-initiated** (`mobile/`, `PaymentService.create_payment`): the customer's own app has already run biometric auth client-side before calling `POST /payments`, so the row is created with `bio_id` set and jumps straight to `AUTHENTICATED`.
 - **Merchant-initiated, open claim** (`biopos/`, `PaymentService.create_payment_request` + `claim_payment_request`): the merchant terminal has no customer to attach yet, so the row is created with `bio_id = NULL` and sits in `AUTHENTICATION_PENDING` until `POST /payments/{id}/claim` (called from the claiming customer's own session) attaches a `bio_id` and transitions it to `AUTHENTICATED`. Demo-only — no pairing check, whoever claims first with a valid session wins.
-- **Merchant-initiated, BioFinance ID push** (`docs/roadmap.md` Phase 5): the merchant enters the customer's `bio_ids.code` at the terminal, so the row is created with `bio_id` already set (`PaymentService.create_payment_request`, 404 if the code doesn't resolve). It still sits in `AUTHENTICATION_PENDING` until the same customer's own session calls `claim` — `claim` rejects any caller whose `user_id` doesn't match the `bio_id` already on the row (403), closing the open-claim race. Sending an actual push notification to `devices.push_token` so the customer's app surfaces the request without them hunting for it is still planned — today they'd need `GET /payments/{id}` with a known id, or the still-planned `GET /payments/pending`. See `docs/security-model.md`.
+- **Merchant-initiated, BioFinance ID push** (`docs/roadmap.md` Phase 5): the merchant enters the customer's `bio_ids.code` at the terminal, so the row is created with `bio_id` already set (`PaymentService.create_payment_request`, 404 if the code doesn't resolve, rate-limited per `app/core/rate_limit.py`). It still sits in `AUTHENTICATION_PENDING` until the same customer's own session calls `claim` — `claim` rejects any caller whose `user_id` doesn't match the `bio_id` already on the row (403), closing the open-claim race. A best-effort push goes to every `devices.push_token` registered to that `bio_id`'s user (`app/services/push_service.py`); `GET /payments/pending` is the fallback if it doesn't land. See `docs/security-model.md`.
 
 Both merchant-initiated variants converge with the customer-initiated path from `AUTHENTICATED` onward — same routing, same state machine.
 

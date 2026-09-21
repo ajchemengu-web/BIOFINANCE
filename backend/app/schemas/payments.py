@@ -25,6 +25,7 @@ class PaymentRequestCreate(BaseModel):
 
 class PaymentResponse(BaseModel):
     id: uuid.UUID
+    merchant_id: uuid.UUID
     status: str
     amount: Decimal
     currency: str

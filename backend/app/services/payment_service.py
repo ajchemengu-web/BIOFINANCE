@@ -28,13 +28,25 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.rate_limit import SlidingWindowRateLimiter
 from app.models.bioid import BioID
+from app.models.merchant import Merchant
 from app.models.provider import ProviderAccount, ProviderConnection
 from app.models.routing_policy import RoutingPolicy
 from app.models.transaction import PaymentAttempt, Transaction
+from app.services.device_service import DeviceService
+from app.services.push_service import PushService
 from app.services.router_service import RouterService
 
 _CANCELLABLE_STATUSES = {"CREATED", "AUTHENTICATION_PENDING", "AUTHENTICATED", "ROUTING"}
+
+# BioFinance ID push pairing's abuse surface (docs/security-model.md,
+# "Abuse surface: unsolicited push spam") — only guards the targeted path
+# (bio_id_code given), not the open-request path, which has no BioFinance
+# ID to spam pushes against in the first place.
+_bio_id_code_rate_limiter = SlidingWindowRateLimiter(limit=5, window_seconds=60)
+_merchant_targeted_request_rate_limiter = SlidingWindowRateLimiter(limit=20, window_seconds=60)
 
 
 class PaymentService:
@@ -83,25 +95,29 @@ class PaymentService:
         bio_id_code — the merchant read it off the customer at the till,
         STK-Push-style — it's resolved now and attached immediately, so
         the request is targeted at that customer specifically (docs/
-        security-model.md, "BioFinance ID push pairing"). Either way the
-        row starts AUTHENTICATION_PENDING: attaching an identity isn't the
-        same as authenticating it, and there's no routing policy to route
-        against until a real session claims it.
+        security-model.md, "BioFinance ID push pairing"), and an advisory
+        push notification goes out to their registered devices (best-effort
+        — see _send_push_pairing_notification). Either way the row starts
+        AUTHENTICATION_PENDING: attaching an identity isn't the same as
+        authenticating it, and there's no routing policy to route against
+        until a real session claims it.
         """
         existing = await self._find_by_idempotency_key(idempotency_key)
         if existing is not None:
             return existing
 
-        target_bio_id_id: uuid.UUID | None = None
+        target_bio_id: BioID | None = None
         if bio_id_code is not None:
+            _bio_id_code_rate_limiter.check(bio_id_code)
+            _merchant_targeted_request_rate_limiter.check(str(merchant_id))
+
             bio_id_result = await self.db.execute(select(BioID).where(BioID.code == bio_id_code))
-            bio_id = bio_id_result.scalar_one_or_none()
-            if bio_id is None:
+            target_bio_id = bio_id_result.scalar_one_or_none()
+            if target_bio_id is None:
                 raise LookupError("No BioFinance ID matches that code")
-            target_bio_id_id = bio_id.id
 
         transaction = Transaction(
-            bio_id=target_bio_id_id,
+            bio_id=target_bio_id.id if target_bio_id else None,
             merchant_id=merchant_id,
             amount=amount,
             currency=currency,
@@ -111,7 +127,40 @@ class PaymentService:
         self.db.add(transaction)
         await self.db.commit()
         await self.db.refresh(transaction)
+
+        if target_bio_id is not None:
+            await self._send_push_pairing_notification(transaction, target_bio_id)
+
         return transaction
+
+    async def _send_push_pairing_notification(self, transaction: Transaction, bio_id: BioID) -> None:
+        """
+        Best-effort advisory push (docs/security-model.md, "The push
+        notification is advisory only") — never raises, never blocks the
+        request's creation. GET /payments/pending is the fallback if this
+        doesn't reach the customer (no token registered, delivery failure,
+        FCM not configured at all).
+        """
+        settings = get_settings()
+        if not settings.fcm_configured:
+            return
+
+        push_tokens = await DeviceService(self.db).list_push_tokens(bio_id.user_id)
+        if not push_tokens:
+            return
+
+        merchant = await self.db.get(Merchant, transaction.merchant_id)
+        merchant_name = merchant.business_name if merchant else "A merchant"
+
+        push_service = PushService(settings)
+        for token in push_tokens:
+            await push_service.send_payment_approval_request(
+                push_token=token,
+                transaction_id=str(transaction.id),
+                merchant_name=merchant_name,
+                amount=transaction.amount,
+                currency=transaction.currency,
+            )
 
     async def claim_payment_request(self, transaction_id: uuid.UUID, user_id: uuid.UUID) -> Transaction:
         """
@@ -278,6 +327,23 @@ class PaymentService:
 
     async def get_payment(self, payment_id: uuid.UUID) -> Transaction | None:
         return await self.db.get(Transaction, payment_id)
+
+    async def list_pending_for_user(self, user_id: uuid.UUID) -> list[Transaction]:
+        """
+        GET /payments/pending — the fallback for BioFinance ID push pairing
+        when the push notification never arrives (docs/security-model.md,
+        "Delivery isn't guaranteed"). Only ever returns targeted requests
+        (bio_id already attached at creation): an open request has bio_id
+        null until someone claims it, so it isn't "this user's" to list
+        until they've already claimed it — see create_payment_request.
+        """
+        bio_id = await self._require_bio_id(user_id)
+        result = await self.db.execute(
+            select(Transaction)
+            .where(Transaction.bio_id == bio_id.id, Transaction.status == "AUTHENTICATION_PENDING")
+            .order_by(Transaction.created_at.desc())
+        )
+        return list(result.scalars().all())
 
     async def cancel_payment(self, payment_id: uuid.UUID) -> Transaction | None:
         transaction = await self.db.get(Transaction, payment_id)

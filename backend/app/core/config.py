@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     # rejects localhost — needs a tunnel (ngrok) or the Render deployment.
     daraja_callback_base_url: str = ""
 
+    # Firebase Cloud Messaging — sends the advisory push notification for
+    # BioFinance ID push pairing (docs/security-model.md). The service
+    # account's whole JSON key file, pasted as one env var (matches how
+    # Render env vars work — one value per key, no file uploads). Get one
+    # from the Firebase console: Project Settings > Service Accounts >
+    # Generate new private key.
+    fcm_project_id: str = ""
+    fcm_service_account_json: str = ""
+
     # Comma-separated origins allowed to call this API from a browser (the
     # Vercel-hosted mobile/ and biopos/ web builds). "*" is fine for this
     # MVP demo stage but should narrow to real origins before anything
@@ -32,6 +41,10 @@ class Settings(BaseSettings):
     @property
     def daraja_configured(self) -> bool:
         return bool(self.daraja_consumer_key and self.daraja_consumer_secret and self.daraja_shortcode)
+
+    @property
+    def fcm_configured(self) -> bool:
+        return bool(self.fcm_project_id and self.fcm_service_account_json)
 
     @property
     def cors_origins_list(self) -> list[str]:

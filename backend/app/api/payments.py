@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.rate_limit import RateLimitExceeded
 from app.db.database import get_db
 from app.models.user import User
 from app.schemas.payments import PaymentCreateRequest, PaymentRequestCreate, PaymentResponse
@@ -61,6 +62,8 @@ async def create_payment_request(
         )
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except RateLimitExceeded as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, str(exc)) from exc
     return transaction
 
 
@@ -86,6 +89,17 @@ async def claim_payment_request(
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return transaction
+
+
+@router.get("/pending", response_model=list[PaymentResponse])
+async def list_pending_payments(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """
+    Fallback discovery for BioFinance ID push pairing when the push never
+    arrives (docs/security-model.md) — every targeted request awaiting
+    this user specifically. Must be registered ahead of GET /{payment_id}
+    below, or FastAPI tries to parse "pending" as a payment_id and 422s.
+    """
+    return await PaymentService(db).list_pending_for_user(user.id)
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)

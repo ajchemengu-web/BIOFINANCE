@@ -42,3 +42,15 @@ class DeviceService:
         await self.db.commit()
         await self.db.refresh(device)
         return device
+
+    async def list_push_tokens(self, user_id: uuid.UUID) -> list[str]:
+        """Every ACTIVE device's push token for a user (BioFinance ID push
+        pairing sends to all of them — a customer may have more than one)."""
+        result = await self.db.execute(
+            select(Device.push_token).where(
+                Device.user_id == user_id,
+                Device.status == "ACTIVE",
+                Device.push_token.is_not(None),
+            )
+        )
+        return [token for token in result.scalars().all() if token]

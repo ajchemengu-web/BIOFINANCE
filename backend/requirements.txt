@@ -7,6 +7,7 @@ pydantic>=2.9
 pydantic[email]>=2.9
 pydantic-settings>=2.6
 pyjwt>=2.10
+cryptography>=43  # pyjwt's RS256 backend — needed for the FCM service-account OAuth2 flow (app/services/push_service.py)
 passlib[bcrypt]>=1.7
 bcrypt<4.1  # passlib 1.7.4's bcrypt backend breaks on bcrypt>=4.1 (removed __about__, stricter 72-byte check)
 httpx>=0.28

@@ -26,6 +26,10 @@ services:
         value: sandbox
       - key: DARAJA_CALLBACK_BASE_URL
         sync: false # set to this service's own public URL once deployed
+      - key: FCM_PROJECT_ID
+        sync: false
+      - key: FCM_SERVICE_ACCOUNT_JSON
+        sync: false # the whole downloaded service-account JSON file, one line
       - key: CORS_ALLOWED_ORIGINS
         sync: false # set to your Vercel deployment URL(s), comma-separated — "*" works for an early demo
 

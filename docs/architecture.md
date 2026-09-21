@@ -73,7 +73,7 @@ Two separate questions, two separate sources of truth, deliberately not merged i
 
 This split is what makes "any provider worldwide, if in agreement" tractable: listing and demoing a new market or partner is data, not code; making it real is still real work (an adapter, credentials, a regulatory relationship in that jurisdiction — see `docs/security-model.md` "Regulatory posture"), scoped to exactly the one provider being added, never touching BioRouter, the payment services, or any other provider's integration.
 
-## BioFinance ID push pairing (partially built)
+## BioFinance ID push pairing (backend complete, Flutter deferred)
 
 Today's merchant-initiated flow (`biopos/`) opens a request with no customer attached and lets whoever calls `claim` first, with a valid session, fulfill it — fine for a demo, not for a POS terminal facing the public (`docs/security-model.md` "Merchant-side integrity"). The replacement mirrors the STK Push pattern retailers already know, keyed on a BioFinance ID instead of a phone number:
 

@@ -6,7 +6,14 @@ routes through BioRouter exactly like a customer-initiated payment. Same
 real-PostgreSQL requirement as test_payment_flow.py.
 """
 
+import json
 import uuid
+
+import respx
+from httpx import Response
+
+from app.core.config import Settings
+from tests.conftest import fake_fcm_service_account_json
 
 
 def _register(client) -> str:
@@ -39,15 +46,19 @@ def _create_merchant(client) -> str:
     return response.json()["id"]
 
 
-def _create_request(client, merchant_id: str, amount: str = "2000.00", bio_id_code: str | None = None) -> dict:
+def _create_request_response(client, merchant_id: str, amount: str = "2000.00", bio_id_code: str | None = None):
     payload = {"merchant_id": merchant_id, "amount": amount, "currency": "KES"}
     if bio_id_code is not None:
         payload["bio_id_code"] = bio_id_code
-    response = client.post(
+    return client.post(
         "/api/v1/payments/request",
         json=payload,
         headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
     )
+
+
+def _create_request(client, merchant_id: str, amount: str = "2000.00", bio_id_code: str | None = None) -> dict:
+    response = _create_request_response(client, merchant_id, amount, bio_id_code)
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -199,6 +210,120 @@ def test_targeted_request_rejects_a_different_customer(client):
         headers=_auth_headers(stranger_token),
     )
     assert response.status_code == 403
+
+
+def test_pending_list_includes_a_targeted_request_awaiting_this_customer(client):
+    token = _register(client)
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, token)
+    request_body = _create_request(client, merchant_id, bio_id_code=code)
+
+    response = client.get("/api/v1/payments/pending", headers=_auth_headers(token))
+    assert response.status_code == 200, response.text
+    ids = {t["id"] for t in response.json()}
+    assert request_body["id"] in ids
+
+
+def test_pending_list_excludes_another_customers_targeted_request(client):
+    target_token = _register(client)
+    stranger_token = _register(client)
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, target_token)
+    request_body = _create_request(client, merchant_id, bio_id_code=code)
+
+    response = client.get("/api/v1/payments/pending", headers=_auth_headers(stranger_token))
+    assert response.status_code == 200, response.text
+    assert request_body["id"] not in {t["id"] for t in response.json()}
+
+
+def test_pending_list_excludes_open_untargeted_requests(client):
+    """An open request (no bio_id_code) has no owner until someone claims
+    it — it shouldn't show up as "pending for me" just because I'm logged
+    in; that would let any authenticated user discover every open request."""
+    token = _register(client)
+    merchant_id = _create_merchant(client)
+    request_body = _create_request(client, merchant_id)  # no bio_id_code
+
+    response = client.get("/api/v1/payments/pending", headers=_auth_headers(token))
+    assert response.status_code == 200, response.text
+    assert request_body["id"] not in {t["id"] for t in response.json()}
+
+
+def test_pending_list_drops_a_request_once_claimed(client):
+    token = _register(client)
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, token)
+    request_body = _create_request(client, merchant_id, bio_id_code=code)
+
+    client.post(f"/api/v1/payments/{request_body['id']}/claim", headers=_auth_headers(token))
+
+    response = client.get("/api/v1/payments/pending", headers=_auth_headers(token))
+    assert response.status_code == 200, response.text
+    assert request_body["id"] not in {t["id"] for t in response.json()}
+
+
+@respx.mock
+def test_targeted_request_sends_a_push_to_the_customers_registered_device(client, monkeypatch):
+    """Wiring test: create_payment_request actually calls PushService when
+    FCM is configured and the target customer has a registered device —
+    not just that PushService itself works in isolation
+    (test_push_service.py already covers that)."""
+    fcm_settings = Settings(
+        fcm_project_id="test-project", fcm_service_account_json=fake_fcm_service_account_json()
+    )
+    monkeypatch.setattr("app.services.payment_service.get_settings", lambda: fcm_settings)
+    respx.post("https://oauth2.googleapis.com/token").mock(
+        return_value=Response(200, json={"access_token": "fake-token", "expires_in": 3599})
+    )
+    send_route = respx.post("https://fcm.googleapis.com/v1/projects/test-project/messages:send").mock(
+        return_value=Response(200, json={"name": "projects/test-project/messages/1"})
+    )
+
+    token = _register(client)
+    device_response = client.post(
+        "/api/v1/devices/register",
+        json={"device_identifier": "device-1", "push_token": "customer-push-token", "platform": "ANDROID"},
+        headers=_auth_headers(token),
+    )
+    assert device_response.status_code == 200, device_response.text
+
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, token)
+    request_body = _create_request(client, merchant_id, bio_id_code=code)
+
+    assert send_route.called
+    sent_body = json.loads(send_route.calls.last.request.content)
+    assert sent_body["message"]["token"] == "customer-push-token"
+    assert sent_body["message"]["data"]["transaction_id"] == request_body["id"]
+
+
+def test_targeted_request_without_a_registered_device_still_succeeds(client):
+    """No push_token registered — create_payment_request must not fail or
+    even try to send; FCM isn't configured in the default test settings
+    either, so this also covers that no-op path."""
+    token = _register(client)
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, token)
+
+    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    assert request_body["status"] == "AUTHENTICATION_PENDING"
+
+
+def test_repeated_requests_against_the_same_bio_id_code_are_rate_limited(client):
+    """Abuse surface documented in docs/security-model.md: a merchant (or
+    anyone who's guessed a valid BioFinance ID) spamming push-pairing
+    requests against one person. 5 per 60s per bio_id_code
+    (app/services/payment_service.py) — each call here uses its own
+    idempotency key so the limiter, not the idempotency short-circuit, is
+    what's under test."""
+    token = _register(client)
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, token)
+
+    responses = [_create_request_response(client, merchant_id, bio_id_code=code) for _ in range(6)]
+
+    assert [r.status_code for r in responses[:5]] == [201] * 5
+    assert responses[5].status_code == 429
 
 
 def test_request_creation_is_idempotent(client):
