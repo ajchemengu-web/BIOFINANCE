@@ -6,10 +6,17 @@ Two ways a Transaction gets created, per the two apps that create them:
   already authenticated client-side by the time this is called, so the
   transaction goes straight to AUTHENTICATED and routes immediately.
 - create_payment_request + claim_payment_request (biopos/, the merchant
-  terminal): the merchant creates a request with no bio_id yet (nobody's
-  authenticated) — it sits in AUTHENTICATION_PENDING until a customer
-  claims it via their own session, at which point claim_payment_request
-  attaches their bio_id and routes it the same way.
+  terminal): the merchant creates a request. Two variants (docs/roadmap.md
+  Phase 5, "BioFinance ID push pairing"):
+    - open claim (no bio_id_code): bio_id stays null until whoever calls
+      claim first, with a valid session, attaches theirs.
+    - BioFinance-ID-targeted (bio_id_code given): bio_id is resolved and
+      attached right away, but the row still sits in AUTHENTICATION_PENDING
+      — attaching identity isn't authenticating it. claim_payment_request
+      then requires the claiming session's bio_id to match the one already
+      on the row, rejecting anyone else.
+  Either way, claim_payment_request is what actually authenticates and
+  routes it.
 Both paths converge on _route_and_resolve so BioRouter behaves identically
 regardless of which app originated the transaction.
 """
@@ -68,19 +75,33 @@ class PaymentService:
         amount: Decimal,
         currency: str,
         idempotency_key: str,
+        bio_id_code: str | None = None,
     ) -> Transaction:
         """
-        Merchant-initiated (biopos/) — no customer identified yet, so
-        bio_id is null until claim_payment_request attaches one. Nothing
-        to route yet either, since there's no routing policy without a
-        user.
+        Merchant-initiated (biopos/). With no bio_id_code, bio_id is null
+        until claim_payment_request attaches one (open claim). With a
+        bio_id_code — the merchant read it off the customer at the till,
+        STK-Push-style — it's resolved now and attached immediately, so
+        the request is targeted at that customer specifically (docs/
+        security-model.md, "BioFinance ID push pairing"). Either way the
+        row starts AUTHENTICATION_PENDING: attaching an identity isn't the
+        same as authenticating it, and there's no routing policy to route
+        against until a real session claims it.
         """
         existing = await self._find_by_idempotency_key(idempotency_key)
         if existing is not None:
             return existing
 
+        target_bio_id_id: uuid.UUID | None = None
+        if bio_id_code is not None:
+            bio_id_result = await self.db.execute(select(BioID).where(BioID.code == bio_id_code))
+            bio_id = bio_id_result.scalar_one_or_none()
+            if bio_id is None:
+                raise LookupError("No BioFinance ID matches that code")
+            target_bio_id_id = bio_id.id
+
         transaction = Transaction(
-            bio_id=None,
+            bio_id=target_bio_id_id,
             merchant_id=merchant_id,
             amount=amount,
             currency=currency,
@@ -95,20 +116,30 @@ class PaymentService:
     async def claim_payment_request(self, transaction_id: uuid.UUID, user_id: uuid.UUID) -> Transaction:
         """
         A customer, authenticated in their own session, fulfills a
-        merchant-created request (POST /payments/{id}/claim). Whoever
-        claims a given request first gets it — there's no pairing
-        mechanism (QR code, proximity, merchant confirmation) yet binding
-        a specific customer to a specific merchant terminal; see
-        docs/security-model.md for this MVP-scope limitation.
+        merchant-created request (POST /payments/{id}/claim).
+
+        If the request was opened with a bio_id_code (BioFinance ID push
+        pairing), only the session belonging to that exact bio_id may
+        claim it — anyone else gets PermissionError, mapped to 403 by the
+        API layer. If it was opened without one (open claim, still around
+        for the QR/legacy path), whoever claims it first with a valid
+        session gets it, as before — see docs/security-model.md for why
+        that path alone isn't production-safe.
         """
         transaction = await self.db.get(Transaction, transaction_id)
         if transaction is None:
             raise LookupError("Payment request not found")
-        if transaction.status != "AUTHENTICATION_PENDING" or transaction.bio_id is not None:
+        if transaction.status != "AUTHENTICATION_PENDING":
             raise ValueError("Payment request is not awaiting a customer")
 
         bio_id = await self._require_bio_id(user_id)
-        transaction.bio_id = bio_id.id
+
+        if transaction.bio_id is not None:
+            if transaction.bio_id != bio_id.id:
+                raise PermissionError("This payment request was opened for a different BioFinance ID")
+        else:
+            transaction.bio_id = bio_id.id
+
         transaction.status = "AUTHENTICATED"
         await self.db.flush()
 

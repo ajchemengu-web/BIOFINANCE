@@ -64,7 +64,7 @@ class PaymentProvider:
 | Provider Layer | Uniform interface over real/mock financial providers | `backend/app/providers/` |
 | PostgreSQL | Source of truth for users, BioIDs, providers, routing policy, transactions, audit log | self-hosted / Render Postgres |
 
-## BioFinance ID push pairing (designed, not yet built)
+## BioFinance ID push pairing (partially built)
 
 Today's merchant-initiated flow (`biopos/`) opens a request with no customer attached and lets whoever calls `claim` first, with a valid session, fulfill it — fine for a demo, not for a POS terminal facing the public (`docs/security-model.md` "Merchant-side integrity"). The replacement mirrors the STK Push pattern retailers already know, keyed on a BioFinance ID instead of a phone number:
 

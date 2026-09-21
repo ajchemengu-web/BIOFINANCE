@@ -39,14 +39,23 @@ def _create_merchant(client) -> str:
     return response.json()["id"]
 
 
-def _create_request(client, merchant_id: str, amount: str = "2000.00") -> dict:
+def _create_request(client, merchant_id: str, amount: str = "2000.00", bio_id_code: str | None = None) -> dict:
+    payload = {"merchant_id": merchant_id, "amount": amount, "currency": "KES"}
+    if bio_id_code is not None:
+        payload["bio_id_code"] = bio_id_code
     response = client.post(
         "/api/v1/payments/request",
-        json={"merchant_id": merchant_id, "amount": amount, "currency": "KES"},
+        json=payload,
         headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _bio_id_code(client, token: str) -> str:
+    response = client.get("/api/v1/bioid", headers=_auth_headers(token))
+    assert response.status_code == 200, response.text
+    return response.json()["code"]
 
 
 def test_request_starts_awaiting_customer(client):
@@ -139,6 +148,57 @@ def test_merchant_polls_status_via_get_without_customer_auth(client):
     poll_response = client.get(f"/api/v1/payments/{request_body['id']}")
     assert poll_response.status_code == 200
     assert poll_response.json()["status"] == "AUTHENTICATION_PENDING"
+
+
+def test_request_with_unknown_bio_id_code_returns_404(client):
+    merchant_id = _create_merchant(client)
+
+    response = client.post(
+        "/api/v1/payments/request",
+        json={"merchant_id": merchant_id, "amount": "500.00", "currency": "KES", "bio_id_code": "BF-NOTREAL"},
+        headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+    )
+    assert response.status_code == 404
+
+
+def test_targeted_request_is_claimed_by_the_matching_customer(client):
+    """BioFinance ID push pairing: merchant enters the customer's BioFinance
+    ID at creation, and that exact customer's session can still claim and
+    route it — same as the open-claim path once they're identified."""
+    token = _register(client)
+    mpesa_id = _connect(client, token, "MPESA", uuid.uuid4().hex)
+    client.put(
+        "/api/v1/routing-policy",
+        json={"mode": "PRIMARY", "primary_provider_id": mpesa_id},
+        headers=_auth_headers(token),
+    )
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, token)
+    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    assert request_body["status"] == "AUTHENTICATION_PENDING"
+
+    claim_response = client.post(
+        f"/api/v1/payments/{request_body['id']}/claim",
+        headers=_auth_headers(token),
+    )
+    assert claim_response.status_code == 200, claim_response.text
+    assert claim_response.json()["status"] == "COMPLETED"
+
+
+def test_targeted_request_rejects_a_different_customer(client):
+    """The whole point of push pairing: a stranger with a valid session
+    can't claim a request that was opened for someone else's BioFinance ID."""
+    target_token = _register(client)
+    stranger_token = _register(client)
+    merchant_id = _create_merchant(client)
+    code = _bio_id_code(client, target_token)
+    request_body = _create_request(client, merchant_id, bio_id_code=code)
+
+    response = client.post(
+        f"/api/v1/payments/{request_body['id']}/claim",
+        headers=_auth_headers(stranger_token),
+    )
+    assert response.status_code == 403
 
 
 def test_request_creation_is_idempotent(client):

@@ -46,13 +46,21 @@ async def create_payment_request(
     claim it via POST /payments/{id}/claim. Unauthenticated for the same
     reason POST /merchants is: there's no merchant-auth endpoint yet
     (docs/roadmap.md Phase 5).
+
+    payload.bio_id_code is optional — the merchant reading a customer's
+    BioFinance ID off them at the till (BioFinance ID push pairing) rather
+    than opening a blind request. See PaymentService.create_payment_request.
     """
-    transaction = await PaymentService(db).create_payment_request(
-        merchant_id=payload.merchant_id,
-        amount=payload.amount,
-        currency=payload.currency,
-        idempotency_key=idempotency_key,
-    )
+    try:
+        transaction = await PaymentService(db).create_payment_request(
+            merchant_id=payload.merchant_id,
+            amount=payload.amount,
+            currency=payload.currency,
+            idempotency_key=idempotency_key,
+            bio_id_code=payload.bio_id_code,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return transaction
 
 
@@ -65,12 +73,16 @@ async def claim_payment_request(
     """
     A customer, authenticated in their own session, fulfills a merchant's
     payment request — attaches their BioID and routes it through
-    BioRouter exactly like create_payment does.
+    BioRouter exactly like create_payment does. If the request was opened
+    with a target BioFinance ID (push pairing), only that customer's
+    session may claim it — anyone else gets 403.
     """
     try:
         transaction = await PaymentService(db).claim_payment_request(payment_id, user.id)
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     return transaction

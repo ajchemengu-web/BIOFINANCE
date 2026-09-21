@@ -54,9 +54,9 @@ Uses mock/local data via Riverpod — no backend calls yet. Verified: `flutter a
 - [ ] **BioFinance ID push pairing** — designed, not yet built. STK-Push-style flow: merchant enters the customer's BioFinance ID at the terminal instead of opening a blind request. Full design: `docs/architecture.md` ("BioFinance ID push pairing"), `docs/security-model.md` (same heading, trust-boundary detail), `docs/api-spec.md` (Devices section + updated Payments rows), `docs/database-schema.md` (`devices.push_token`/`platform`). Implementation steps, roughly in dependency order:
   - [x] Migration: `devices.push_token`, `devices.platform` columns (`0003_devices_push_token`).
   - [x] `POST /devices/register` — first endpoint to actually use the (previously unused) `devices` table; upserts on (`user_id`, `device_identifier`), 4 new tests in `backend/tests/test_devices.py` (32/32 passing overall).
-  - [ ] `bio_id_code` param on `POST /payments/request` — resolve to `user_id`, attach `bio_id` at creation instead of leaving it null.
+  - [x] `bio_id_code` param on `POST /payments/request` — resolves to a `bio_id`, attaches it at creation instead of leaving it null (404 if the code doesn't match); row still starts `AUTHENTICATION_PENDING`, attaching identity isn't authenticating it.
+  - [x] `claim` ownership check — 403 when the caller's `user_id` doesn't match a pre-attached `bio_id`; the open-claim path (no `bio_id_code`) is unchanged. 3 new tests in `backend/tests/test_biopos_payment_flow.py` (35/35 passing overall).
   - [ ] `push_service.py` (FCM) — send the advisory notification once `bio_id_code` resolves; needs an `FCM_PROJECT_ID` / service-account env var alongside the existing `DARAJA_*` ones.
-  - [ ] `claim` ownership check — 403 `PAIRING_MISMATCH` when the caller's `user_id` doesn't match a pre-attached `bio_id`.
   - [ ] `GET /payments/pending` — fallback listing for when push delivery fails.
   - [ ] `biopos/`: replace blind amount-entry with a BioFinance-ID-entry step.
   - [ ] `mobile/`: receive push → approval screen (merchant name, amount) → local biometric prompt → `claim` call.
