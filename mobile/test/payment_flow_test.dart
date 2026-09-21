@@ -102,12 +102,16 @@ void main() {
         find.text('No providers connected yet. Connect one from the Providers tab.'),
       );
 
-      // Connect M-PESA.
+      // Connect M-PESA — found by its own tile rather than "the first
+      // Connect button", since the provider list now comes from the
+      // catalog (GET /provider-catalog, docs/architecture.md "Provider
+      // catalog") and isn't guaranteed to list M-PESA first.
       await tester.tap(find.byIcon(Icons.link));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Connect').first);
-      await _pumpUntilFound(tester, find.text('Disconnect'));
-      expect(find.text('Disconnect'), findsOneWidget);
+      final mpesaCard = find.ancestor(of: find.text('M-PESA'), matching: find.byType(Card));
+      await tester.tap(find.descendant(of: mpesaCard, matching: find.widgetWithText(OutlinedButton, 'Connect')));
+      await _pumpUntilFound(tester, find.descendant(of: mpesaCard, matching: find.text('Disconnect')));
+      expect(find.descendant(of: mpesaCard, matching: find.text('Disconnect')), findsOneWidget);
 
       // Dashboard should now show the mock M-PESA balance.
       await tester.tap(find.byIcon(Icons.account_balance_wallet));

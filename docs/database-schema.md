@@ -38,13 +38,25 @@ Devices authorized to authenticate on behalf of a user (device binding, §37). W
 | status | text | `ACTIVE`, `REVOKED` |
 | created_at | timestamptz | |
 
+### provider_catalog
+The business/product truth of which financial providers exist and can be connected — worldwide, not just Kenya — separate from `app/providers/registry.py`'s technical truth of how to talk to each one. See `docs/architecture.md` "Provider catalog". `code` is a plain string primary key (not a uuid) since it's the same stable value `provider_connections.provider_code` already used as free text — now backed by a real foreign key.
+| column | type | notes |
+|---|---|---|
+| code | text, pk | `MPESA`, `EQUITY`, `AIRTEL`, ... |
+| display_name | text | `M-PESA`, `Equity Bank`, ... |
+| country_code | text | ISO 3166-1 alpha-2 (`KE`), or `GLOBAL` for a provider not tied to one country |
+| currency | text | ISO 4217 (`KES`) |
+| category | text | `MOBILE_MONEY`, `BANK`, `CARD`, `WALLET` |
+| status | text | `AVAILABLE`, `COMING_SOON`, `DISABLED` |
+| created_at | timestamptz | |
+
 ### provider_connections
 A user's link to one financial provider (real or mock).
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |
 | user_id | uuid, fk → users | |
-| provider_code | text | `MPESA`, `EQUITY`, `AIRTEL`, ... |
+| provider_code | text, fk → provider_catalog | must be an `AVAILABLE` catalog entry (enforced by `POST /providers/connect`; the FK alone would only guarantee the code *exists*, not that it's connectable) |
 | status | text | `CONNECTED`, `DISCONNECTED` |
 | created_at | timestamptz | |
 

@@ -21,11 +21,16 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 |---|---|---|---|
 | POST | `/devices/register` | authenticated; upserts on (`user_id`, `device_identifier`) — updates `push_token`/`platform` on re-registration rather than creating a duplicate row. `push_token`/`platform` are optional (a device with no push permission yet can still register). Wires the previously-unused `devices` table (§37). | done |
 
+## Provider Catalog
+| Method | Path | Purpose | Status |
+|---|---|---|---|
+| GET | `/provider-catalog` | reference data, unauthenticated on purpose. Optional `?country=KE` (ISO 3166-1 alpha-2) filter. Returns every catalog entry including `COMING_SOON`/`DISABLED` ones so a client can show them rather than just omitting them. See `docs/architecture.md` "Provider catalog". | done |
+
 ## Providers
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | GET | `/providers` | list connected providers | done |
-| POST | `/providers/connect` | connect a provider (real or mock) | done |
+| POST | `/providers/connect` | connect a provider (real or mock) — `provider_code` must be an `AVAILABLE` entry in the provider catalog (404 unknown code, 409 `COMING_SOON`/`DISABLED`) | done |
 | DELETE | `/providers/{id}` | disconnect a provider | done |
 
 ## Balances

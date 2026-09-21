@@ -64,6 +64,15 @@ class PaymentProvider:
 | Provider Layer | Uniform interface over real/mock financial providers | `backend/app/providers/` |
 | PostgreSQL | Source of truth for users, BioIDs, providers, routing policy, transactions, audit log | self-hosted / Render Postgres |
 
+## Provider catalog
+
+Two separate questions, two separate sources of truth, deliberately not merged into one:
+
+- **Which providers exist and can be connected** — `provider_catalog` (`docs/database-schema.md`), a plain database table: `code`, `display_name`, `country_code`, `currency`, `category`, `status`. Adding a provider anywhere in the world is a row in this table. `GET /provider-catalog` serves it; `POST /providers/connect` validates against it (and the database's own foreign key backs that up); `mobile/`'s provider-selection screen renders it instead of a hardcoded list.
+- **How to actually talk to a given provider** — `app/providers/registry.py`, mapping a `provider_code` to a concrete `PaymentProvider` (`app/providers/base.py`, "The non-negotiable rule" above). A catalog row alone is enough to get a *mock* connection working end-to-end (`GenericMockProvider` covers any code without a bespoke adapter) — a *real* one, moving real money, still needs an adapter class like `DarajaProvider` plus an actual integration agreement with that provider.
+
+This split is what makes "any provider worldwide, if in agreement" tractable: listing and demoing a new market or partner is data, not code; making it real is still real work (an adapter, credentials, a regulatory relationship in that jurisdiction — see `docs/security-model.md` "Regulatory posture"), scoped to exactly the one provider being added, never touching BioRouter, the payment services, or any other provider's integration.
+
 ## BioFinance ID push pairing (partially built)
 
 Today's merchant-initiated flow (`biopos/`) opens a request with no customer attached and lets whoever calls `claim` first, with a valid session, fulfill it — fine for a demo, not for a POS terminal facing the public (`docs/security-model.md` "Merchant-side integrity"). The replacement mirrors the STK Push pattern retailers already know, keyed on a BioFinance ID instead of a phone number:

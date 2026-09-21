@@ -10,6 +10,7 @@ from app.models.provider import ProviderAccount, ProviderConnection
 from app.models.user import User
 from app.schemas.providers import ProviderConnectionResponse, ProviderConnectRequest
 from app.services.payment_service import PaymentService
+from app.services.provider_catalog_service import ProviderCatalogService
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 
@@ -26,6 +27,19 @@ async def connect_provider(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """
+    provider_code must be a real, connectable entry in the provider
+    catalog (docs/architecture.md "Provider catalog") — the database's own
+    foreign key would reject an unknown code anyway, but checking status
+    here lets a COMING_SOON/DISABLED entry give a clear 409 instead of a
+    raw constraint-violation 500.
+    """
+    catalog_entry = await ProviderCatalogService(db).get_by_code(payload.provider_code)
+    if catalog_entry is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown provider_code")
+    if catalog_entry.status != "AVAILABLE":
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{payload.provider_code} is not yet available ({catalog_entry.status})")
+
     connection = ProviderConnection(user_id=user.id, provider_code=payload.provider_code)
     db.add(connection)
     await db.flush()
