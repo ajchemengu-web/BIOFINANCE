@@ -35,7 +35,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-`GET http://localhost:8000/health` returns `{"status": "ok"}`. Run tests: `pytest` from `backend/` — 28 tests: the customer-initiated payment flow end-to-end (register → connect providers → route a payment → fall back on decline → idempotent replay → transaction history), the merchant-initiated flow (open a request → claim it → routes the same way → double-claim rejected), the BioRouter fallback algorithm in isolation, the Daraja provider against a mocked HTTP transport (`respx`), and the Daraja callback handler — all against the real database except the mocked-transport one.
+`GET http://localhost:8000/health` returns `{"status": "ok"}`. Run tests: `pytest` from `backend/` — 32 tests: the customer-initiated payment flow end-to-end (register → connect providers → route a payment → fall back on decline → idempotent replay → transaction history), the merchant-initiated flow (open a request → claim it → routes the same way → double-claim rejected), the BioRouter fallback algorithm in isolation, the Daraja provider against a mocked HTTP transport (`respx`), the Daraja callback handler, and device registration (`POST /devices/register` — the push-token side of BioFinance ID push pairing, `docs/roadmap.md` Phase 5) — all against the real database except the mocked-transport one.
 
 Notes:
 - `requirements.txt` pins `bcrypt<4.1` — `passlib` 1.7.4 (last released 2020) breaks against bcrypt 4.1+, which dropped the `__about__` attribute passlib's backend detection relies on.

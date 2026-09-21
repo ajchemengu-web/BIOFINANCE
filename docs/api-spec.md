@@ -19,7 +19,7 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 ## Devices
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/devices/register` | authenticated; upsert the calling device's `device_identifier` + `push_token` + `platform` for the current user (wires the existing but unused `devices` table, §37) | planned — see `docs/roadmap.md` Phase 5, BioFinance ID push pairing |
+| POST | `/devices/register` | authenticated; upserts on (`user_id`, `device_identifier`) — updates `push_token`/`platform` on re-registration rather than creating a duplicate row. `push_token`/`platform` are optional (a device with no push permission yet can still register). Wires the previously-unused `devices` table (§37). | done |
 
 ## Providers
 | Method | Path | Purpose | Status |

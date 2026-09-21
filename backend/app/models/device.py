@@ -14,4 +14,6 @@ class Device(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     device_identifier: Mapped[str] = mapped_column(String)
     public_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    push_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    platform: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="ACTIVE")

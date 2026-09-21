@@ -26,15 +26,15 @@ One-to-one with `users`. The provider-independent identity (e.g. `BF-8X7K29`). N
 | created_at | timestamptz | |
 
 ### devices
-Devices authorized to authenticate on behalf of a user (device binding, §37). Currently modeled but unused — no `POST /devices/register` endpoint exists yet (see `docs/roadmap.md` Phase 5, BioFinance ID push pairing).
+Devices authorized to authenticate on behalf of a user (device binding, §37). Wired via `POST /devices/register` (upserts on `user_id` + `device_identifier`) — see `docs/roadmap.md` Phase 5, BioFinance ID push pairing.
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |
 | user_id | uuid, fk → users | |
 | device_identifier | text | |
 | public_key | text | for hardware-backed signature verification, future use |
-| push_token | text, nullable | **planned** — FCM registration token; opaque, revoked on logout/device removal |
-| platform | text, nullable | **planned** — `ANDROID`, `IOS`, `WEB` |
+| push_token | text, nullable | FCM registration token; opaque, cleared on logout/device removal — set by `POST /devices/register`, not yet consumed by anything (push sending is still planned) |
+| platform | text, nullable | `ANDROID`, `IOS`, `WEB` — set by `POST /devices/register` |
 | status | text | `ACTIVE`, `REVOKED` |
 | created_at | timestamptz | |
 

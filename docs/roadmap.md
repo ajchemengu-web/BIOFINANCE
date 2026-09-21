@@ -52,8 +52,8 @@ Uses mock/local data via Riverpod — no backend calls yet. Verified: `flutter a
 - [ ] Real merchant authentication and `merchant_devices` enforcement — `POST /payments/request` currently accepts any `merchant_id` from anyone, and BioPOS creates a fresh `Merchant` row on every sign-in rather than authenticating an existing one (see `docs/security-model.md` "Merchant-side integrity"). No JWT scoped to merchants exists yet, distinct from the customer `users` JWT.
 - [ ] `POST /payments/{id}/claim` has no pairing mechanism (QR code, proximity, merchant confirmation) — whoever calls it first with a valid customer session gets the request. Fine for an MVP demo, not for production (`docs/security-model.md`).
 - [ ] **BioFinance ID push pairing** — designed, not yet built. STK-Push-style flow: merchant enters the customer's BioFinance ID at the terminal instead of opening a blind request. Full design: `docs/architecture.md` ("BioFinance ID push pairing"), `docs/security-model.md` (same heading, trust-boundary detail), `docs/api-spec.md` (Devices section + updated Payments rows), `docs/database-schema.md` (`devices.push_token`/`platform`). Implementation steps, roughly in dependency order:
-  - [ ] Migration: `devices.push_token`, `devices.platform` columns.
-  - [ ] `POST /devices/register` — first endpoint to actually use the (currently unused) `devices` table.
+  - [x] Migration: `devices.push_token`, `devices.platform` columns (`0003_devices_push_token`).
+  - [x] `POST /devices/register` — first endpoint to actually use the (previously unused) `devices` table; upserts on (`user_id`, `device_identifier`), 4 new tests in `backend/tests/test_devices.py` (32/32 passing overall).
   - [ ] `bio_id_code` param on `POST /payments/request` — resolve to `user_id`, attach `bio_id` at creation instead of leaving it null.
   - [ ] `push_service.py` (FCM) — send the advisory notification once `bio_id_code` resolves; needs an `FCM_PROJECT_ID` / service-account env var alongside the existing `DARAJA_*` ones.
   - [ ] `claim` ownership check — 403 `PAIRING_MISMATCH` when the caller's `user_id` doesn't match a pre-attached `bio_id`.

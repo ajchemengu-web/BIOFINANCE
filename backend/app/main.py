@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, balances, bioid, merchants, payments, providers, routing, transactions
+from app.api import auth, balances, bioid, devices, merchants, payments, providers, routing, transactions
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -24,6 +24,7 @@ app.add_middleware(
 api_prefix = "/api/v1"
 app.include_router(auth.router, prefix=api_prefix)
 app.include_router(bioid.router, prefix=api_prefix)
+app.include_router(devices.router, prefix=api_prefix)
 app.include_router(providers.router, prefix=api_prefix)
 app.include_router(balances.router, prefix=api_prefix)
 app.include_router(routing.router, prefix=api_prefix)
