@@ -51,6 +51,16 @@ Uses mock/local data via Riverpod — no backend calls yet. Verified: `flutter a
 - [x] **`biopos/` wired to these endpoints** — `AmountEntryScreen` creates via `POST /payments/request`, `WaitingScreen` polls `GET /payments/{id}` on a real `Timer.periodic`, `Cancel` calls `POST /payments/{id}/cancel`. No in-app "simulate customer" button — that's deliberately not BioPOS's job; a real customer claims from their own `mobile/` session. Verified end-to-end by `biopos/test/payment_flow_test.dart`, which drives BioPOS's actual UI to create a request, then plays "the customer, on another device" via raw HTTP (register → connect a provider → set routing → `POST /payments/{id}/claim`) and confirms BioPOS's polling picks up the `COMPLETED` result and shows the receipt.
 - [ ] Real merchant authentication and `merchant_devices` enforcement — `POST /payments/request` currently accepts any `merchant_id` from anyone, and BioPOS creates a fresh `Merchant` row on every sign-in rather than authenticating an existing one (see `docs/security-model.md` "Merchant-side integrity"). No JWT scoped to merchants exists yet, distinct from the customer `users` JWT.
 - [ ] `POST /payments/{id}/claim` has no pairing mechanism (QR code, proximity, merchant confirmation) — whoever calls it first with a valid customer session gets the request. Fine for an MVP demo, not for production (`docs/security-model.md`).
+- [ ] **BioFinance ID push pairing** — designed, not yet built. STK-Push-style flow: merchant enters the customer's BioFinance ID at the terminal instead of opening a blind request. Full design: `docs/architecture.md` ("BioFinance ID push pairing"), `docs/security-model.md` (same heading, trust-boundary detail), `docs/api-spec.md` (Devices section + updated Payments rows), `docs/database-schema.md` (`devices.push_token`/`platform`). Implementation steps, roughly in dependency order:
+  - [ ] Migration: `devices.push_token`, `devices.platform` columns.
+  - [ ] `POST /devices/register` — first endpoint to actually use the (currently unused) `devices` table.
+  - [ ] `bio_id_code` param on `POST /payments/request` — resolve to `user_id`, attach `bio_id` at creation instead of leaving it null.
+  - [ ] `push_service.py` (FCM) — send the advisory notification once `bio_id_code` resolves; needs an `FCM_PROJECT_ID` / service-account env var alongside the existing `DARAJA_*` ones.
+  - [ ] `claim` ownership check — 403 `PAIRING_MISMATCH` when the caller's `user_id` doesn't match a pre-attached `bio_id`.
+  - [ ] `GET /payments/pending` — fallback listing for when push delivery fails.
+  - [ ] `biopos/`: replace blind amount-entry with a BioFinance-ID-entry step.
+  - [ ] `mobile/`: receive push → approval screen (merchant name, amount) → local biometric prompt → `claim` call.
+  - [ ] Rate limiting on `POST /payments/request` when `bio_id_code` is supplied (push-spam abuse vector, see `docs/security-model.md`).
 
 ## Phase 6 — End-to-End Demonstration
 - [ ] Full path: customer biometric → BioID → BioRouter → Daraja → M-PESA → merchant confirmation → customer transaction history

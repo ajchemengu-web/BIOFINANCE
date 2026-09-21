@@ -16,6 +16,11 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 | GET | `/bioid` | fetch current user's BioID | done |
 | POST | `/bioid/lock` | lock the BioID (fraud/lost device) | done |
 
+## Devices
+| Method | Path | Purpose | Status |
+|---|---|---|---|
+| POST | `/devices/register` | authenticated; upsert the calling device's `device_identifier` + `push_token` + `platform` for the current user (wires the existing but unused `devices` table, §37) | planned — see `docs/roadmap.md` Phase 5, BioFinance ID push pairing |
+
 ## Providers
 | Method | Path | Purpose | Status |
 |---|---|---|---|
@@ -38,8 +43,9 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | POST | `/payments` | customer-initiated (`mobile/`): create + route a payment via BioRouter, authenticated, requires `Idempotency-Key` | done |
-| POST | `/payments/request` | merchant-initiated (`biopos/`): open a payment request with no customer yet, unauthenticated (no merchant-auth endpoint exists — see `docs/roadmap.md` Phase 5), requires `Idempotency-Key` | done |
-| POST | `/payments/{id}/claim` | a customer, authenticated in their own session, fulfills a merchant's request — attaches their BioID and routes it | done |
+| POST | `/payments/request` | merchant-initiated (`biopos/`): open a payment request, unauthenticated (no merchant-auth endpoint exists — see `docs/roadmap.md` Phase 5), requires `Idempotency-Key`. Optional `bio_id_code` — when given, resolves to a `user_id`, attaches `bio_id` on the row immediately instead of leaving it null, and triggers a push notification to that user's registered devices (`POST /devices/register`). Omitted, it's the existing open request with no target customer. | `bio_id_code` + push send: planned |
+| POST | `/payments/{id}/claim` | a customer, authenticated in their own session, fulfills a merchant's request — attaches their BioID (if not already set) and routes it. **When the row already has a `bio_id`** (a BioFinance ID push request), the caller's `user_id` must match it or the call returns 403 (`PAIRING_MISMATCH`) — closes the "whoever calls first" gap that the open-request path still has. | ownership check: planned |
+| GET | `/payments/pending` | authenticated; lists the caller's own transactions in `AUTHENTICATION_PENDING` with a `bio_id` already attached — fallback discovery if a push notification never arrives or the app was closed when it did | planned |
 | GET | `/payments/{id}` | payment/request status — unauthenticated on purpose, so `biopos/` can poll it | done |
 | POST | `/payments/{id}/cancel` | cancel a pending payment | done |
 
