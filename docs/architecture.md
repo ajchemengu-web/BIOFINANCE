@@ -86,6 +86,12 @@ Today's merchant-initiated flow (`biopos/`) opens a request with no customer att
 
 Full design: `docs/api-spec.md` (Devices + updated Payments sections), `docs/database-schema.md` (`devices.push_token`/`platform`), `docs/security-model.md` ("BioFinance ID push pairing"), `docs/roadmap.md` Phase 5.
 
+## Merchant authentication (backend complete, `biopos/` not wired to it)
+
+Mirrors customer auth (`POST /auth/register`/`login` → JWT) rather than inventing a second scheme, with one deliberate difference: a merchant's token carries `type: "merchant_access"`/`"merchant_refresh"` instead of `"access"`/`"refresh"` (`app/core/security.py`), so `get_current_merchant` (`app/core/deps.py`) and `get_current_user` reject each other's tokens structurally — a leaked merchant credential can't be replayed against a customer-scoped endpoint by construction, not by an endpoint remembering to check a role field.
+
+`POST /payments/request` and `POST /payments/{id}/cancel` both now require a merchant token and take `merchant_id` from it, never from the request body — the gap `docs/security-model.md` flagged ("anyone can currently open a payment request against any merchant ID") is closed for *which merchant*. It is not yet closed for *which device*: `merchant_devices` (§33 of the source PRD) still has no registration endpoint and still isn't checked, so a leaked merchant credential still works from anywhere. That's the next layer, not built this pass.
+
 ## Deployment target
 
 Backend deploys to **Render** as a Python web service (see `render.yaml`). Render's managed Postgres is the initial database — no Supabase/Firebase, no managed-DB vendor lock-in beyond "it's Postgres." Local dev points `DATABASE_URL` at the same instance or a locally installed Postgres.

@@ -88,11 +88,13 @@ One per user. Drives BioRouter (§22-23).
 | id | uuid, pk | |
 | business_name | text | |
 | merchant_code | text, unique | |
+| email | text, unique, nullable | login identifier — nullable, not backfilled (migration `0005`): a merchant row created before real merchant auth existed has no credential and simply can't log in |
+| password_hash | text, nullable | bcrypt, same as `users.password_hash` |
 | status | text | `ACTIVE`, `SUSPENDED` |
 | created_at | timestamptz | |
 
 ### merchant_devices
-Only registered merchant devices may initiate production payment requests (§33).
+Only registered merchant devices may initiate production payment requests (§33). **Not enforced yet** — `POST /payments/request` now requires the calling *merchant* to be authenticated (`docs/roadmap.md` Phase 5), but doesn't yet check that the specific *device* is one of that merchant's registered `merchant_devices`. This table exists but, like `devices` before the push-pairing work wired it up, has no registration endpoint yet.
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |

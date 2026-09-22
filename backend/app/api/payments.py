@@ -3,9 +3,10 @@ import uuid
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_merchant, get_current_user
 from app.core.rate_limit import RateLimitExceeded
 from app.db.database import get_db
+from app.models.merchant import Merchant
 from app.models.user import User
 from app.schemas.payments import PaymentCreateRequest, PaymentRequestCreate, PaymentResponse
 from app.services.payment_service import PaymentService
@@ -39,14 +40,14 @@ async def create_payment(
 async def create_payment_request(
     payload: PaymentRequestCreate,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Merchant-initiated (biopos/) — no customer session here (BioPOS has no
-    customer auth), so this just opens a request awaiting a customer to
-    claim it via POST /payments/{id}/claim. Unauthenticated for the same
-    reason POST /merchants is: there's no merchant-auth endpoint yet
-    (docs/roadmap.md Phase 5).
+    Merchant-initiated (biopos/), authenticated as the merchant (docs/
+    roadmap.md Phase 5, "Real merchant authentication") — this opens a
+    request against the calling merchant's own id, never a client-supplied
+    one, then awaits a customer to claim it via POST /payments/{id}/claim.
 
     payload.bio_id_code is optional — the merchant reading a customer's
     BioFinance ID off them at the till (BioFinance ID push pairing) rather
@@ -54,7 +55,7 @@ async def create_payment_request(
     """
     try:
         transaction = await PaymentService(db).create_payment_request(
-            merchant_id=payload.merchant_id,
+            merchant_id=merchant.id,
             amount=payload.amount,
             currency=payload.currency,
             idempotency_key=idempotency_key,
@@ -111,8 +112,21 @@ async def get_payment(payment_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 
 
 @router.post("/{payment_id}/cancel", response_model=PaymentResponse)
-async def cancel_payment(payment_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    transaction = await PaymentService(db).cancel_payment(payment_id)
+async def cancel_payment(
+    payment_id: uuid.UUID,
+    merchant: Merchant = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Merchant-only, and only the merchant that owns the request — cancel is
+    exclusively a BioPOS operation (docs/roadmap.md Phase 5; mobile/ never
+    calls this), so the same authentication this route needed for creation
+    applies here too.
+    """
+    try:
+        transaction = await PaymentService(db).cancel_payment(payment_id, merchant.id)
+    except PermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     if transaction is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment not found")
     return transaction

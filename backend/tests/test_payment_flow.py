@@ -33,9 +33,19 @@ def _connect(client, token: str, provider_code: str, account_ref: str) -> str:
 
 
 def _create_merchant(client) -> str:
-    response = client.post("/api/v1/merchants", json={"business_name": "Java House"})
+    """POST /payments (customer-initiated) only needs a merchant_id to pay
+    to, not that merchant's own credentials — unlike POST /payments/request,
+    see test_biopos_payment_flow.py."""
+    email = f"merchant-{uuid.uuid4().hex[:8]}@biofinance.dev"
+    response = client.post(
+        "/api/v1/merchants/register",
+        json={"business_name": "Java House", "email": email, "password": "password123"},
+    )
     assert response.status_code == 201, response.text
-    return response.json()["id"]
+    token = response.json()["access_token"]
+    profile = client.get("/api/v1/merchants/me", headers=_auth_headers(token))
+    assert profile.status_code == 200, profile.text
+    return profile.json()["id"]
 
 
 def test_payment_succeeds_via_primary_provider(client):

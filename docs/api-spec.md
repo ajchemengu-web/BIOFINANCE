@@ -48,11 +48,11 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | POST | `/payments` | customer-initiated (`mobile/`): create + route a payment via BioRouter, authenticated, requires `Idempotency-Key` | done |
-| POST | `/payments/request` | merchant-initiated (`biopos/`): open a payment request, unauthenticated (no merchant-auth endpoint exists — see `docs/roadmap.md` Phase 5), requires `Idempotency-Key`. Optional `bio_id_code` — when given, resolves to a `bio_id` and attaches it on the row immediately instead of leaving it null (404 if the code doesn't match anything), triggers a best-effort push to the target's registered devices, and is rate-limited (429 past 5/60s for that code or 20/60s for the merchant). Omitted, it's the existing open request with no target customer, unaffected by the rate limit. | done |
+| POST | `/payments/request` | merchant-initiated (`biopos/`): authenticated as the merchant (`get_current_merchant` — see Merchants below), opens a request against the *caller's own* merchant id, never a client-supplied one, requires `Idempotency-Key`. Optional `bio_id_code` — when given, resolves to a `bio_id` and attaches it on the row immediately instead of leaving it null (404 if the code doesn't match anything), triggers a best-effort push to the target's registered devices, and is rate-limited (429 past 5/60s for that code or 20/60s for the merchant). Omitted, it's the existing open request with no target customer, unaffected by the rate limit. | done |
 | POST | `/payments/{id}/claim` | a customer, authenticated in their own session, fulfills a merchant's request — attaches their BioID (if not already set) and routes it. **When the row already has a `bio_id`** (a BioFinance ID push request), the caller's `user_id` must match it or the call returns 403 — closes the "whoever calls first" gap that the open-request path still has. | done |
 | GET | `/payments/pending` | authenticated; lists the caller's own transactions in `AUTHENTICATION_PENDING` with a `bio_id` already attached — fallback discovery if a push notification never arrives or the app was closed when it did. Must be registered ahead of `GET /{id}` in the router or FastAPI tries to parse "pending" as a payment id. | done |
 | GET | `/payments/{id}` | payment/request status — unauthenticated on purpose, so `biopos/` can poll it | done |
-| POST | `/payments/{id}/cancel` | cancel a pending payment | done |
+| POST | `/payments/{id}/cancel` | authenticated as the merchant that owns the request (403 if a different merchant's token is used) — cancel is exclusively a BioPOS operation, `mobile/` never calls it | done |
 
 ## Transactions
 | Method | Path | Purpose | Status |
@@ -63,8 +63,12 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 ## Merchants
 | Method | Path | Purpose | Status |
 |---|---|---|---|
-| POST | `/merchants` | register a merchant (not in original PRD spec — added so payments have something real to target before BioPOS exists in Phase 5) | done |
-| GET | `/merchants/{id}` | merchant detail | done |
+| POST | `/merchants/register` | create a merchant account (business_name, email, password) and issue merchant-scoped tokens — 409 if the email's already registered. Replaces the old unauthenticated `POST /merchants` (docs/roadmap.md Phase 5, "Real merchant authentication"). | done |
+| POST | `/merchants/login` | email + password → merchant-scoped access + refresh token | done |
+| GET | `/merchants/me` | the authenticated merchant's own profile | done |
+| GET | `/merchants/{id}` | merchant detail — unauthenticated on purpose, so a receipt or a payment response can show whose request it is without the viewer being that merchant; nothing it returns is sensitive | done |
+
+Merchant tokens are structurally distinct from customer (`users`) tokens — same JWT signing, but `type: "merchant_access"`/`"merchant_refresh"` instead of `"access"`/`"refresh"` (`app/core/security.py`), checked by a separate dependency (`get_current_merchant`, `app/core/deps.py`). A merchant's token is rejected by every customer-scoped endpoint and vice versa, not just by which endpoints happen to call which dependency.
 
 ## Daraja
 | Method | Path | Purpose | Status |

@@ -1,10 +1,17 @@
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 
-class MerchantCreateRequest(BaseModel):
+class MerchantRegisterRequest(BaseModel):
     business_name: str
+    email: EmailStr
+    password: str
+
+
+class MerchantLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
 
 
 class MerchantResponse(BaseModel):

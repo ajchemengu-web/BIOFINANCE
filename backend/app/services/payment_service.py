@@ -345,10 +345,15 @@ class PaymentService:
         )
         return list(result.scalars().all())
 
-    async def cancel_payment(self, payment_id: uuid.UUID) -> Transaction | None:
+    async def cancel_payment(self, payment_id: uuid.UUID, merchant_id: uuid.UUID) -> Transaction | None:
+        """merchant_id is the authenticated caller's own id (docs/roadmap.md
+        Phase 5, "Real merchant authentication") — raises PermissionError,
+        mapped to 403 by the API layer, if it doesn't own this request."""
         transaction = await self.db.get(Transaction, payment_id)
         if transaction is None:
             return None
+        if transaction.merchant_id != merchant_id:
+            raise PermissionError("This payment request belongs to a different merchant")
         if transaction.status in _CANCELLABLE_STATUSES:
             transaction.status = "CANCELLED"
             await self.db.commit()

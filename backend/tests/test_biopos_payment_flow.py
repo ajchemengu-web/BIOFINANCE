@@ -1,9 +1,10 @@
 """
 End-to-end test of the merchant-initiated payment flow BioPOS needs
-(docs/roadmap.md Phase 5): a merchant creates a payment request with no
-customer identified yet, a customer claims it in their own session, and it
-routes through BioRouter exactly like a customer-initiated payment. Same
-real-PostgreSQL requirement as test_payment_flow.py.
+(docs/roadmap.md Phase 5): a merchant, authenticated with its own
+credentials, creates a payment request with no customer identified yet, a
+customer claims it in their own session, and it routes through BioRouter
+exactly like a customer-initiated payment. Same real-PostgreSQL
+requirement as test_payment_flow.py.
 """
 
 import json
@@ -40,25 +41,33 @@ def _connect(client, token: str, provider_code: str, account_ref: str) -> str:
     return response.json()["id"]
 
 
-def _create_merchant(client) -> str:
-    response = client.post("/api/v1/merchants", json={"business_name": "Naivas"})
+def _create_merchant(client) -> tuple[str, str]:
+    """Returns (merchant_id, merchant_access_token)."""
+    email = f"merchant-{uuid.uuid4().hex[:8]}@biofinance.dev"
+    response = client.post(
+        "/api/v1/merchants/register",
+        json={"business_name": "Naivas", "email": email, "password": "password123"},
+    )
     assert response.status_code == 201, response.text
-    return response.json()["id"]
+    token = response.json()["access_token"]
+    profile = client.get("/api/v1/merchants/me", headers=_auth_headers(token))
+    assert profile.status_code == 200, profile.text
+    return profile.json()["id"], token
 
 
-def _create_request_response(client, merchant_id: str, amount: str = "2000.00", bio_id_code: str | None = None):
-    payload = {"merchant_id": merchant_id, "amount": amount, "currency": "KES"}
+def _create_request_response(client, merchant_token: str, amount: str = "2000.00", bio_id_code: str | None = None):
+    payload = {"amount": amount, "currency": "KES"}
     if bio_id_code is not None:
         payload["bio_id_code"] = bio_id_code
     return client.post(
         "/api/v1/payments/request",
         json=payload,
-        headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+        headers={**_auth_headers(merchant_token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
     )
 
 
-def _create_request(client, merchant_id: str, amount: str = "2000.00", bio_id_code: str | None = None) -> dict:
-    response = _create_request_response(client, merchant_id, amount, bio_id_code)
+def _create_request(client, merchant_token: str, amount: str = "2000.00", bio_id_code: str | None = None) -> dict:
+    response = _create_request_response(client, merchant_token, amount, bio_id_code)
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -70,11 +79,21 @@ def _bio_id_code(client, token: str) -> str:
 
 
 def test_request_starts_awaiting_customer(client):
-    merchant_id = _create_merchant(client)
-    body = _create_request(client, merchant_id)
+    merchant_id, merchant_token = _create_merchant(client)
+    body = _create_request(client, merchant_token)
 
     assert body["status"] == "AUTHENTICATION_PENDING"
     assert body["selected_provider"] is None
+    assert body["merchant_id"] == merchant_id
+
+
+def test_request_requires_merchant_authentication(client):
+    response = client.post(
+        "/api/v1/payments/request",
+        json={"amount": "500.00", "currency": "KES"},
+        headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+    )
+    assert response.status_code in (401, 403)
 
 
 def test_customer_claims_request_and_it_routes(client):
@@ -85,8 +104,8 @@ def test_customer_claims_request_and_it_routes(client):
         json={"mode": "PRIMARY", "primary_provider_id": mpesa_id},
         headers=_auth_headers(token),
     )
-    merchant_id = _create_merchant(client)
-    request_body = _create_request(client, merchant_id)
+    _, merchant_token = _create_merchant(client)
+    request_body = _create_request(client, merchant_token)
 
     claim_response = client.post(
         f"/api/v1/payments/{request_body['id']}/claim",
@@ -107,8 +126,8 @@ def test_claimed_request_appears_in_the_claiming_customers_history(client):
         json={"mode": "PRIMARY", "primary_provider_id": mpesa_id},
         headers=_auth_headers(token),
     )
-    merchant_id = _create_merchant(client)
-    request_body = _create_request(client, merchant_id)
+    _, merchant_token = _create_merchant(client)
+    request_body = _create_request(client, merchant_token)
 
     # Not the customer's yet — merchant just created it, nobody's claimed it.
     history_before = client.get("/api/v1/transactions", headers=_auth_headers(token))
@@ -129,8 +148,8 @@ def test_claiming_an_already_claimed_request_fails(client):
         json={"mode": "PRIMARY", "primary_provider_id": mpesa_id},
         headers=_auth_headers(token_a),
     )
-    merchant_id = _create_merchant(client)
-    request_body = _create_request(client, merchant_id)
+    _, merchant_token = _create_merchant(client)
+    request_body = _create_request(client, merchant_token)
 
     first_claim = client.post(
         f"/api/v1/payments/{request_body['id']}/claim", headers=_auth_headers(token_a)
@@ -153,21 +172,51 @@ def test_claiming_a_nonexistent_request_returns_404(client):
 
 def test_merchant_polls_status_via_get_without_customer_auth(client):
     """BioPOS has no customer session to attach — GET must stay open."""
-    merchant_id = _create_merchant(client)
-    request_body = _create_request(client, merchant_id)
+    _, merchant_token = _create_merchant(client)
+    request_body = _create_request(client, merchant_token)
 
     poll_response = client.get(f"/api/v1/payments/{request_body['id']}")
     assert poll_response.status_code == 200
     assert poll_response.json()["status"] == "AUTHENTICATION_PENDING"
 
 
+def test_merchant_cancels_its_own_request(client):
+    _, merchant_token = _create_merchant(client)
+    request_body = _create_request(client, merchant_token)
+
+    response = client.post(
+        f"/api/v1/payments/{request_body['id']}/cancel", headers=_auth_headers(merchant_token)
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "CANCELLED"
+
+
+def test_merchant_cannot_cancel_another_merchants_request(client):
+    _, owner_token = _create_merchant(client)
+    _, other_token = _create_merchant(client)
+    request_body = _create_request(client, owner_token)
+
+    response = client.post(
+        f"/api/v1/payments/{request_body['id']}/cancel", headers=_auth_headers(other_token)
+    )
+    assert response.status_code == 403
+
+
+def test_cancel_requires_merchant_authentication(client):
+    _, merchant_token = _create_merchant(client)
+    request_body = _create_request(client, merchant_token)
+
+    response = client.post(f"/api/v1/payments/{request_body['id']}/cancel")
+    assert response.status_code in (401, 403)
+
+
 def test_request_with_unknown_bio_id_code_returns_404(client):
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
 
     response = client.post(
         "/api/v1/payments/request",
-        json={"merchant_id": merchant_id, "amount": "500.00", "currency": "KES", "bio_id_code": "BF-NOTREAL"},
-        headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+        json={"amount": "500.00", "currency": "KES", "bio_id_code": "BF-NOTREAL"},
+        headers={**_auth_headers(merchant_token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
     )
     assert response.status_code == 404
 
@@ -183,9 +232,9 @@ def test_targeted_request_is_claimed_by_the_matching_customer(client):
         json={"mode": "PRIMARY", "primary_provider_id": mpesa_id},
         headers=_auth_headers(token),
     )
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, token)
-    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    request_body = _create_request(client, merchant_token, bio_id_code=code)
     assert request_body["status"] == "AUTHENTICATION_PENDING"
 
     claim_response = client.post(
@@ -201,9 +250,9 @@ def test_targeted_request_rejects_a_different_customer(client):
     can't claim a request that was opened for someone else's BioFinance ID."""
     target_token = _register(client)
     stranger_token = _register(client)
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, target_token)
-    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    request_body = _create_request(client, merchant_token, bio_id_code=code)
 
     response = client.post(
         f"/api/v1/payments/{request_body['id']}/claim",
@@ -214,9 +263,9 @@ def test_targeted_request_rejects_a_different_customer(client):
 
 def test_pending_list_includes_a_targeted_request_awaiting_this_customer(client):
     token = _register(client)
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, token)
-    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    request_body = _create_request(client, merchant_token, bio_id_code=code)
 
     response = client.get("/api/v1/payments/pending", headers=_auth_headers(token))
     assert response.status_code == 200, response.text
@@ -227,9 +276,9 @@ def test_pending_list_includes_a_targeted_request_awaiting_this_customer(client)
 def test_pending_list_excludes_another_customers_targeted_request(client):
     target_token = _register(client)
     stranger_token = _register(client)
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, target_token)
-    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    request_body = _create_request(client, merchant_token, bio_id_code=code)
 
     response = client.get("/api/v1/payments/pending", headers=_auth_headers(stranger_token))
     assert response.status_code == 200, response.text
@@ -241,8 +290,8 @@ def test_pending_list_excludes_open_untargeted_requests(client):
     it — it shouldn't show up as "pending for me" just because I'm logged
     in; that would let any authenticated user discover every open request."""
     token = _register(client)
-    merchant_id = _create_merchant(client)
-    request_body = _create_request(client, merchant_id)  # no bio_id_code
+    _, merchant_token = _create_merchant(client)
+    request_body = _create_request(client, merchant_token)  # no bio_id_code
 
     response = client.get("/api/v1/payments/pending", headers=_auth_headers(token))
     assert response.status_code == 200, response.text
@@ -251,9 +300,9 @@ def test_pending_list_excludes_open_untargeted_requests(client):
 
 def test_pending_list_drops_a_request_once_claimed(client):
     token = _register(client)
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, token)
-    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    request_body = _create_request(client, merchant_token, bio_id_code=code)
 
     client.post(f"/api/v1/payments/{request_body['id']}/claim", headers=_auth_headers(token))
 
@@ -287,9 +336,9 @@ def test_targeted_request_sends_a_push_to_the_customers_registered_device(client
     )
     assert device_response.status_code == 200, device_response.text
 
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, token)
-    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    request_body = _create_request(client, merchant_token, bio_id_code=code)
 
     assert send_route.called
     sent_body = json.loads(send_route.calls.last.request.content)
@@ -302,10 +351,10 @@ def test_targeted_request_without_a_registered_device_still_succeeds(client):
     even try to send; FCM isn't configured in the default test settings
     either, so this also covers that no-op path."""
     token = _register(client)
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, token)
 
-    request_body = _create_request(client, merchant_id, bio_id_code=code)
+    request_body = _create_request(client, merchant_token, bio_id_code=code)
     assert request_body["status"] == "AUTHENTICATION_PENDING"
 
 
@@ -317,27 +366,27 @@ def test_repeated_requests_against_the_same_bio_id_code_are_rate_limited(client)
     idempotency key so the limiter, not the idempotency short-circuit, is
     what's under test."""
     token = _register(client)
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     code = _bio_id_code(client, token)
 
-    responses = [_create_request_response(client, merchant_id, bio_id_code=code) for _ in range(6)]
+    responses = [_create_request_response(client, merchant_token, bio_id_code=code) for _ in range(6)]
 
     assert [r.status_code for r in responses[:5]] == [201] * 5
     assert responses[5].status_code == 429
 
 
 def test_request_creation_is_idempotent(client):
-    merchant_id = _create_merchant(client)
+    _, merchant_token = _create_merchant(client)
     idempotency_key = f"TX-{uuid.uuid4().hex}"
 
     first = client.post(
         "/api/v1/payments/request",
-        json={"merchant_id": merchant_id, "amount": "500.00", "currency": "KES"},
-        headers={"Idempotency-Key": idempotency_key},
+        json={"amount": "500.00", "currency": "KES"},
+        headers={**_auth_headers(merchant_token), "Idempotency-Key": idempotency_key},
     )
     second = client.post(
         "/api/v1/payments/request",
-        json={"merchant_id": merchant_id, "amount": "500.00", "currency": "KES"},
-        headers={"Idempotency-Key": idempotency_key},
+        json={"amount": "500.00", "currency": "KES"},
+        headers={**_auth_headers(merchant_token), "Idempotency-Key": idempotency_key},
     )
     assert first.json()["id"] == second.json()["id"]
