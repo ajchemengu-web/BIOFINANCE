@@ -6,6 +6,7 @@ from app.api import (
     balances,
     bioid,
     devices,
+    merchant_devices,
     merchants,
     payments,
     provider_catalog,
@@ -43,6 +44,7 @@ app.include_router(routing.router, prefix=api_prefix)
 app.include_router(payments.router, prefix=api_prefix)
 app.include_router(transactions.router, prefix=api_prefix)
 app.include_router(merchants.router, prefix=api_prefix)
+app.include_router(merchant_devices.router, prefix=api_prefix)
 
 
 @app.get("/health")

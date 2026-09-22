@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.models.merchant import Merchant
 from app.models.user import User
 from app.schemas.payments import PaymentCreateRequest, PaymentRequestCreate, PaymentResponse
+from app.services.merchant_device_service import MerchantDeviceService
 from app.services.payment_service import PaymentService
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -40,6 +41,7 @@ async def create_payment(
 async def create_payment_request(
     payload: PaymentRequestCreate,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    device_identifier: str = Header(..., alias="Device-Identifier"),
     merchant: Merchant = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -49,11 +51,18 @@ async def create_payment_request(
     request against the calling merchant's own id, never a client-supplied
     one, then awaits a customer to claim it via POST /payments/{id}/claim.
 
+    Device-Identifier must be one this merchant has registered via
+    POST /merchant-devices/register (§33 of the source PRD,
+    docs/security-model.md "Merchant-side integrity") — the merchant token
+    alone proves *which merchant*, this proves *which terminal*, so a
+    leaked/shared credential can't be used from an arbitrary device.
+
     payload.bio_id_code is optional — the merchant reading a customer's
     BioFinance ID off them at the till (BioFinance ID push pairing) rather
     than opening a blind request. See PaymentService.create_payment_request.
     """
     try:
+        await MerchantDeviceService(db).require_registered(merchant.id, device_identifier)
         transaction = await PaymentService(db).create_payment_request(
             merchant_id=merchant.id,
             amount=payload.amount,
@@ -61,6 +70,8 @@ async def create_payment_request(
             idempotency_key=idempotency_key,
             bio_id_code=payload.bio_id_code,
         )
+    except PermissionError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     except RateLimitExceeded as exc:

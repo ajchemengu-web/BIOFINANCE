@@ -41,8 +41,15 @@ def _connect(client, token: str, provider_code: str, account_ref: str) -> str:
     return response.json()["id"]
 
 
+_DEFAULT_DEVICE = "device-1"
+
+
 def _create_merchant(client) -> tuple[str, str]:
-    """Returns (merchant_id, merchant_access_token)."""
+    """Returns (merchant_id, merchant_access_token). Also registers a
+    default terminal (_DEFAULT_DEVICE) so _create_request/_create_request_response
+    work out of the box — merchant_devices enforcement (docs/roadmap.md
+    Phase 5, "Merchant-side integrity") requires one registered device
+    before POST /payments/request will accept anything from this merchant."""
     email = f"merchant-{uuid.uuid4().hex[:8]}@biofinance.dev"
     response = client.post(
         "/api/v1/merchants/register",
@@ -50,19 +57,37 @@ def _create_merchant(client) -> tuple[str, str]:
     )
     assert response.status_code == 201, response.text
     token = response.json()["access_token"]
+
+    device_response = client.post(
+        "/api/v1/merchant-devices/register",
+        json={"device_identifier": _DEFAULT_DEVICE},
+        headers=_auth_headers(token),
+    )
+    assert device_response.status_code == 200, device_response.text
+
     profile = client.get("/api/v1/merchants/me", headers=_auth_headers(token))
     assert profile.status_code == 200, profile.text
     return profile.json()["id"], token
 
 
-def _create_request_response(client, merchant_token: str, amount: str = "2000.00", bio_id_code: str | None = None):
+def _create_request_response(
+    client,
+    merchant_token: str,
+    amount: str = "2000.00",
+    bio_id_code: str | None = None,
+    device_identifier: str = _DEFAULT_DEVICE,
+):
     payload = {"amount": amount, "currency": "KES"}
     if bio_id_code is not None:
         payload["bio_id_code"] = bio_id_code
     return client.post(
         "/api/v1/payments/request",
         json=payload,
-        headers={**_auth_headers(merchant_token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+        headers={
+            **_auth_headers(merchant_token),
+            "Idempotency-Key": f"TX-{uuid.uuid4().hex}",
+            "Device-Identifier": device_identifier,
+        },
     )
 
 
@@ -91,9 +116,46 @@ def test_request_requires_merchant_authentication(client):
     response = client.post(
         "/api/v1/payments/request",
         json={"amount": "500.00", "currency": "KES"},
-        headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+        headers={"Idempotency-Key": f"TX-{uuid.uuid4().hex}", "Device-Identifier": _DEFAULT_DEVICE},
     )
     assert response.status_code in (401, 403)
+
+
+def test_request_requires_a_device_identifier_header(client):
+    _, merchant_token = _create_merchant(client)
+
+    response = client.post(
+        "/api/v1/payments/request",
+        json={"amount": "500.00", "currency": "KES"},
+        headers={**_auth_headers(merchant_token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+    )
+    assert response.status_code == 422
+
+
+def test_request_rejects_an_unregistered_device(client):
+    _, merchant_token = _create_merchant(client)
+
+    response = _create_request_response(client, merchant_token, device_identifier="a-device-never-registered")
+    assert response.status_code == 403
+
+
+def test_request_rejects_a_device_registered_to_a_different_merchant(client):
+    """A device_identifier registered to merchant A must not authorize
+    requests for merchant B, even with merchant B's own valid token — the
+    check is scoped to the (merchant_id, device_identifier) pair, not the
+    device identifier string alone."""
+    _, token_a = _create_merchant(client)
+    _, token_b = _create_merchant(client)
+
+    register_response = client.post(
+        "/api/v1/merchant-devices/register",
+        json={"device_identifier": "shared-device-id"},
+        headers=_auth_headers(token_a),
+    )
+    assert register_response.status_code == 200, register_response.text
+
+    response = _create_request_response(client, token_b, device_identifier="shared-device-id")
+    assert response.status_code == 403
 
 
 def test_customer_claims_request_and_it_routes(client):
@@ -213,11 +275,7 @@ def test_cancel_requires_merchant_authentication(client):
 def test_request_with_unknown_bio_id_code_returns_404(client):
     _, merchant_token = _create_merchant(client)
 
-    response = client.post(
-        "/api/v1/payments/request",
-        json={"amount": "500.00", "currency": "KES", "bio_id_code": "BF-NOTREAL"},
-        headers={**_auth_headers(merchant_token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
-    )
+    response = _create_request_response(client, merchant_token, bio_id_code="BF-NOTREAL")
     assert response.status_code == 404
 
 
@@ -382,11 +440,20 @@ def test_request_creation_is_idempotent(client):
     first = client.post(
         "/api/v1/payments/request",
         json={"amount": "500.00", "currency": "KES"},
-        headers={**_auth_headers(merchant_token), "Idempotency-Key": idempotency_key},
+        headers={
+            **_auth_headers(merchant_token),
+            "Idempotency-Key": idempotency_key,
+            "Device-Identifier": _DEFAULT_DEVICE,
+        },
     )
     second = client.post(
         "/api/v1/payments/request",
         json={"amount": "500.00", "currency": "KES"},
-        headers={**_auth_headers(merchant_token), "Idempotency-Key": idempotency_key},
+        headers={
+            **_auth_headers(merchant_token),
+            "Idempotency-Key": idempotency_key,
+            "Device-Identifier": _DEFAULT_DEVICE,
+        },
     )
+    assert first.status_code == 201, first.text
     assert first.json()["id"] == second.json()["id"]

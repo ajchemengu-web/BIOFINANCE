@@ -48,7 +48,7 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | POST | `/payments` | customer-initiated (`mobile/`): create + route a payment via BioRouter, authenticated, requires `Idempotency-Key` | done |
-| POST | `/payments/request` | merchant-initiated (`biopos/`): authenticated as the merchant (`get_current_merchant` — see Merchants below), opens a request against the *caller's own* merchant id, never a client-supplied one, requires `Idempotency-Key`. Optional `bio_id_code` — when given, resolves to a `bio_id` and attaches it on the row immediately instead of leaving it null (404 if the code doesn't match anything), triggers a best-effort push to the target's registered devices, and is rate-limited (429 past 5/60s for that code or 20/60s for the merchant). Omitted, it's the existing open request with no target customer, unaffected by the rate limit. | done |
+| POST | `/payments/request` | merchant-initiated (`biopos/`): authenticated as the merchant (`get_current_merchant` — see Merchants below), opens a request against the *caller's own* merchant id, never a client-supplied one, requires `Idempotency-Key` and `Device-Identifier` (must be a device that merchant registered via `POST /merchant-devices/register` — 403 otherwise; see Merchant Devices below). Optional `bio_id_code` — when given, resolves to a `bio_id` and attaches it on the row immediately instead of leaving it null (404 if the code doesn't match anything), triggers a best-effort push to the target's registered devices, and is rate-limited (429 past 5/60s for that code or 20/60s for the merchant). Omitted, it's the existing open request with no target customer, unaffected by the rate limit. | done |
 | POST | `/payments/{id}/claim` | a customer, authenticated in their own session, fulfills a merchant's request — attaches their BioID (if not already set) and routes it. **When the row already has a `bio_id`** (a BioFinance ID push request), the caller's `user_id` must match it or the call returns 403 — closes the "whoever calls first" gap that the open-request path still has. | done |
 | GET | `/payments/pending` | authenticated; lists the caller's own transactions in `AUTHENTICATION_PENDING` with a `bio_id` already attached — fallback discovery if a push notification never arrives or the app was closed when it did. Must be registered ahead of `GET /{id}` in the router or FastAPI tries to parse "pending" as a payment id. | done |
 | GET | `/payments/{id}` | payment/request status — unauthenticated on purpose, so `biopos/` can poll it | done |
@@ -69,6 +69,13 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 | GET | `/merchants/{id}` | merchant detail — unauthenticated on purpose, so a receipt or a payment response can show whose request it is without the viewer being that merchant; nothing it returns is sensitive | done |
 
 Merchant tokens are structurally distinct from customer (`users`) tokens — same JWT signing, but `type: "merchant_access"`/`"merchant_refresh"` instead of `"access"`/`"refresh"` (`app/core/security.py`), checked by a separate dependency (`get_current_merchant`, `app/core/deps.py`). A merchant's token is rejected by every customer-scoped endpoint and vice versa, not just by which endpoints happen to call which dependency.
+
+## Merchant Devices
+| Method | Path | Purpose | Status |
+|---|---|---|---|
+| POST | `/merchant-devices/register` | authenticated as the merchant; upserts on (`merchant_id`, `device_identifier`) — re-registering re-activates rather than erroring. Wires the previously-unused `merchant_devices` table (§33). Self-service, same trust model as `POST /devices/register` on the customer side. | done |
+
+The device-level counterpart to merchant authentication — a merchant token proves *which merchant*, `Device-Identifier` on `POST /payments/request` (checked against this table) proves *which terminal*. A merchant with no registered device can authenticate but can't open a payment request until it registers one.
 
 ## Daraja
 | Method | Path | Purpose | Status |

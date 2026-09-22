@@ -94,7 +94,7 @@ One per user. Drives BioRouter (§22-23).
 | created_at | timestamptz | |
 
 ### merchant_devices
-Only registered merchant devices may initiate production payment requests (§33). **Not enforced yet** — `POST /payments/request` now requires the calling *merchant* to be authenticated (`docs/roadmap.md` Phase 5), but doesn't yet check that the specific *device* is one of that merchant's registered `merchant_devices`. This table exists but, like `devices` before the push-pairing work wired it up, has no registration endpoint yet.
+Only registered merchant devices may initiate production payment requests (§33) — enforced: `POST /payments/request` requires a `Device-Identifier` header naming a row here (`merchant_id` + `device_identifier`, `status = ACTIVE`) for the authenticated merchant, 403 otherwise (`app/services/merchant_device_service.py`). Wired via `POST /merchant-devices/register` (self-service, upserts on `merchant_id` + `device_identifier` — no unique DB constraint, application-level find-or-create, same pattern as the customer-side `devices` table).
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |
