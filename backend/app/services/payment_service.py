@@ -67,6 +67,7 @@ class PaymentService:
         if existing is not None:
             return existing
 
+        self._require_within_transaction_limit(amount)
         bio_id = await self._require_bio_id(user_id)
 
         transaction = Transaction(
@@ -109,6 +110,8 @@ class PaymentService:
         existing = await self._find_by_idempotency_key(idempotency_key)
         if existing is not None:
             return existing
+
+        self._require_within_transaction_limit(amount)
 
         target_bio_id: BioID | None = None
         if bio_id_code is not None:
@@ -334,6 +337,15 @@ class PaymentService:
         await self.db.commit()
         await self.db.refresh(transaction)
         return transaction
+
+    def _require_within_transaction_limit(self, amount: Decimal) -> None:
+        """docs/security-model.md 'Fraud protection (MVP scope)' —
+        Transaction limits. Per-transaction, not aggregate/daily; the
+        latter would need querying a customer's recent transaction
+        history, not built here."""
+        limit = get_settings().max_transaction_amount
+        if amount > limit:
+            raise ValueError(f"Amount exceeds the maximum allowed per transaction ({limit})")
 
     async def _find_by_idempotency_key(self, idempotency_key: str) -> Transaction | None:
         existing = await self.db.execute(

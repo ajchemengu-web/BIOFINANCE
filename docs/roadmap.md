@@ -87,6 +87,11 @@ Uses mock/local data via Riverpod — no backend calls yet. Verified: `flutter a
 - [ ] No read endpoint for `audit_events` — this pass is write-side only (the documented requirement). An admin/ops view, alerting on the trail, or the "suspicious-transaction logging"/"repeated-biometric-failure detection" items under "Fraud protection (MVP scope)" in `docs/security-model.md` would consume it — none of that exists yet.
 - 7 new backend tests (`backend/tests/test_audit_service.py`, querying `audit_events` directly since no read endpoint exists) — 79/79 passing overall against real Postgres.
 
+## Phase 9 — Transaction Limits
+- [x] `Settings.max_transaction_amount` (env `MAX_TRANSACTION_AMOUNT`, default `150000.00` KES) — a per-transaction cap from `docs/security-model.md` "Fraud protection (MVP scope)", checked in `PaymentService.create_payment` and `create_payment_request` before a transaction is created (400 over the cap). Per-transaction only, not a daily/aggregate limit — that would need querying a customer's recent transaction history, not built.
+- 3 new backend tests (`backend/tests/test_transaction_limits.py`) — 82/82 passing overall against real Postgres.
+- [ ] The rest of "Fraud protection (MVP scope)" beyond transaction limits and the rate limiting/device verification already covered elsewhere: suspicious-transaction logging and repeated-biometric-failure detection remain unbuilt — `audit_events` (Phase 8) is the raw material either would consume, no detection/alerting logic exists yet.
+
 ## Not in MVP (do not build yet)
 National biometric database · government identity integration · physical biometric cards · custom fingerprint hardware · real bank integrations · real Airtel integration · cross-bank settlement · customer fund custody · lending · insurance · investments · cryptocurrency · AI financial advisor · nationwide deployment.
 

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,6 +32,14 @@ class Settings(BaseSettings):
     # Generate new private key.
     fcm_project_id: str = ""
     fcm_service_account_json: str = ""
+
+    # Per-transaction cap (docs/security-model.md "Fraud protection (MVP
+    # scope)" — "Transaction limits"), not a daily/aggregate one. Default
+    # roughly matches M-PESA's own real-world per-transaction ceiling —
+    # a placeholder to tune, not a regulatory figure this app has derived
+    # or verified. Checked at payment-creation time in both
+    # PaymentService.create_payment and create_payment_request.
+    max_transaction_amount: Decimal = Decimal("150000.00")
 
     # Comma-separated origins allowed to call this API from a browser (the
     # Vercel-hosted mobile/ and biopos/ web builds). "*" is fine for this

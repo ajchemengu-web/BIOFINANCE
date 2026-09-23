@@ -45,7 +45,11 @@ Replaces the open-claim gap above with an STK-Push-style flow, keyed on the BioF
 
 ## Fraud protection (MVP scope)
 
-- Transaction limits, basic rate limiting, device verification, mandatory idempotency keys on payment creation, suspicious-transaction logging, repeated-biometric-failure detection.
+- **Transaction limits — wired.** `Settings.max_transaction_amount` (env `MAX_TRANSACTION_AMOUNT`, default `150000.00` KES) is checked in both `PaymentService.create_payment` and `create_payment_request` before a transaction is created — 400 over the cap. Per-transaction only, not a daily/aggregate limit (that would need querying a customer's recent history, not built).
+- **Mandatory idempotency keys on payment creation — wired** (`Idempotency-Key` header, both payment-creation endpoints, since Phase 3).
+- **Basic rate limiting — partially wired.** The `bio_id_code`-targeted path of `POST /payments/request` is rate-limited (`app/core/rate_limit.py`, see "BioFinance ID push pairing" above); general payment creation (customer-initiated `POST /payments`, or an open merchant request) isn't.
+- **Device verification — partially wired.** `merchant_devices` enforcement (above) verifies the *merchant's* device on `POST /payments/request`; there's no equivalent check on the *customer* side (`POST /payments`, `claim`) — a customer's `devices` table entries (BioFinance ID push pairing) are used for push delivery, not as an authorization gate.
+- **Not wired**: suspicious-transaction logging, repeated-biometric-failure detection — `audit_events` (below) now exists as the raw material either would consume, but no detection/alerting logic is built on top of it.
 - Explicitly deferred: behavioral anomaly detection, ML-based risk scoring, device fingerprinting beyond the basic `device_identifier`, merchant risk scoring.
 
 ## Audit logging
