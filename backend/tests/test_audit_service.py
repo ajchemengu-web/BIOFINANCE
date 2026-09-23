@@ -3,10 +3,12 @@ Audit logging (docs/security-model.md "Audit logging") — audit_events has
 existed since the first migration but nothing wrote to it until now.
 Verifies the documented minimum event set actually lands rows, not just
 that the endpoints it's wired into still return the right HTTP status.
+Also covers SUSPICIOUS_TRANSACTION (repeated payment failures) and
+GET /audit-events, the self-scoped read side.
 
-Queries the database directly (a fresh AsyncSession per check, not the
-TestClient) since there's no read endpoint for audit_events — deliberately
-not built this pass, see docs/roadmap.md.
+Most of these query the database directly (a fresh AsyncSession per
+check) rather than GET /audit-events, so a bug in the read endpoint can't
+mask a bug in the write side — the two are tested independently.
 """
 
 import asyncio
@@ -186,3 +188,92 @@ def test_payment_lifecycle_is_audited(client):
         assert len(_events_for(user_id, "PAYMENT_COMPLETED")) >= 1
     else:
         assert len(_events_for(user_id, "PAYMENT_FAILED")) >= 1
+
+
+def _create_merchant_id(client) -> str:
+    response = client.post(
+        "/api/v1/merchants/register",
+        json={
+            "business_name": "Audit Test Merchant",
+            "email": f"merchant-{uuid.uuid4().hex[:8]}@biofinance.dev",
+            "password": "password123",
+        },
+    )
+    token = response.json()["access_token"]
+    return client.get("/api/v1/merchants/me", headers=_auth_headers(token)).json()["id"]
+
+
+def test_repeated_payment_failures_are_flagged_suspicious(client):
+    """No provider connected and no routing policy — every payment
+    deterministically resolves to PROVIDER_UNAVAILABLE (PaymentService.
+    _route_and_resolve's early-return path), a clean way to trigger N
+    failures in a row without simulating provider declines."""
+    token, email = _register(client)
+    user_id = _user_id_from_login(client, email)
+    merchant_id = _create_merchant_id(client)
+
+    for _ in range(3):
+        response = client.post(
+            "/api/v1/payments",
+            json={"merchant_id": merchant_id, "amount": "1.00", "currency": "KES"},
+            headers={**_auth_headers(token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["status"] == "PROVIDER_UNAVAILABLE"
+
+    assert len(_events_for(user_id, "PAYMENT_FAILED")) >= 3
+    suspicious = _events_for(user_id, "SUSPICIOUS_TRANSACTION")
+    assert len(suspicious) >= 1
+    assert suspicious[0].event_metadata["reason"] == "repeated_payment_failures"
+
+
+def test_two_payment_failures_do_not_trigger_the_suspicious_flag(client):
+    """Below the threshold (3) — makes sure this isn't firing on every
+    failure, just repeated ones."""
+    token, email = _register(client)
+    user_id = _user_id_from_login(client, email)
+    merchant_id = _create_merchant_id(client)
+
+    for _ in range(2):
+        client.post(
+            "/api/v1/payments",
+            json={"merchant_id": merchant_id, "amount": "1.00", "currency": "KES"},
+            headers={**_auth_headers(token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+        )
+
+    assert _events_for(user_id, "SUSPICIOUS_TRANSACTION") == []
+
+
+def test_audit_events_endpoint_returns_only_the_caller_own_events(client):
+    token_a, _ = _register(client)
+    token_b, _ = _register(client)
+
+    client.post("/api/v1/bioid/lock", headers=_auth_headers(token_a))
+
+    response_a = client.get("/api/v1/audit-events", headers=_auth_headers(token_a))
+    assert response_a.status_code == 200, response_a.text
+    assert any(e["event_type"] == "BIOID_LOCKED" for e in response_a.json())
+
+    response_b = client.get("/api/v1/audit-events", headers=_auth_headers(token_b))
+    assert response_b.status_code == 200, response_b.text
+    assert all(e["event_type"] != "BIOID_LOCKED" for e in response_b.json())
+
+
+def test_audit_events_endpoint_requires_auth(client):
+    response = client.get("/api/v1/audit-events")
+    assert response.status_code in (401, 403)
+
+
+def test_audit_events_endpoint_respects_limit(client):
+    token, _ = _register(client)
+    merchant_id = _create_merchant_id(client)
+    for _ in range(3):
+        client.post(
+            "/api/v1/payments",
+            json={"merchant_id": merchant_id, "amount": "1.00", "currency": "KES"},
+            headers={**_auth_headers(token), "Idempotency-Key": f"TX-{uuid.uuid4().hex}"},
+        )
+
+    response = client.get("/api/v1/audit-events", params={"limit": 1}, headers=_auth_headers(token))
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == 1

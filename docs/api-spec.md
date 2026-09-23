@@ -16,6 +16,11 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 | GET | `/bioid` | fetch current user's BioID | done |
 | POST | `/bioid/lock` | lock the BioID (fraud/lost device) | done |
 
+## Audit
+| Method | Path | Purpose | Status |
+|---|---|---|---|
+| GET | `/audit-events` | authenticated; the caller's own `audit_events` rows, newest first, `?limit=` (default 50, max 200). Self-scoped only — no admin/broader view, no role concept exists to gate one. See `docs/security-model.md` "Audit logging". | done |
+
 ## Devices
 | Method | Path | Purpose | Status |
 |---|---|---|---|

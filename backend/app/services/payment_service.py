@@ -49,6 +49,13 @@ _CANCELLABLE_STATUSES = {"CREATED", "AUTHENTICATION_PENDING", "AUTHENTICATED", "
 _bio_id_code_rate_limiter = SlidingWindowRateLimiter(limit=5, window_seconds=60)
 _merchant_targeted_request_rate_limiter = SlidingWindowRateLimiter(limit=20, window_seconds=60)
 
+# "Suspicious-transaction logging" (docs/security-model.md "Fraud
+# protection (MVP scope)") — a fixed count/window rule, not behavioral
+# modeling (explicitly deferred in the same doc). Values are a starting
+# point to tune, not derived from real fraud data.
+_SUSPICIOUS_FAILURE_THRESHOLD = 3
+_SUSPICIOUS_FAILURE_WINDOW_SECONDS = 600
+
 
 class PaymentService:
     def __init__(self, db: AsyncSession) -> None:
@@ -217,9 +224,7 @@ class PaymentService:
 
         if policy is None:
             transaction.status = "PROVIDER_UNAVAILABLE"
-            AuditService(self.db).log(
-                "PAYMENT_FAILED", user_id=user_id, transaction_id=str(transaction.id), status=transaction.status
-            )
+            await self._log_payment_failed(user_id, str(transaction.id), transaction.status)
             await self.db.commit()
             await self.db.refresh(transaction)
             return transaction
@@ -278,9 +283,7 @@ class PaymentService:
                 provider=transaction.selected_provider,
             )
         elif transaction.status in ("PROVIDER_UNAVAILABLE", "DECLINED"):
-            AuditService(self.db).log(
-                "PAYMENT_FAILED", user_id=user_id, transaction_id=str(transaction.id), status=transaction.status
-            )
+            await self._log_payment_failed(user_id, str(transaction.id), transaction.status)
         # AUTHORIZATION_PENDING (Daraja in flight) logs nothing yet — the
         # eventual outcome is logged by handle_daraja_callback below.
 
@@ -330,9 +333,7 @@ class PaymentService:
             )
         else:
             transaction.status = "DECLINED"
-            AuditService(self.db).log(
-                "PAYMENT_FAILED", user_id=user_id, transaction_id=str(transaction.id), status=transaction.status
-            )
+            await self._log_payment_failed(user_id, str(transaction.id), transaction.status)
 
         await self.db.commit()
         await self.db.refresh(transaction)
@@ -346,6 +347,28 @@ class PaymentService:
         limit = get_settings().max_transaction_amount
         if amount > limit:
             raise ValueError(f"Amount exceeds the maximum allowed per transaction ({limit})")
+
+    async def _log_payment_failed(self, user_id: uuid.UUID | None, transaction_id: str, status: str) -> None:
+        """PAYMENT_FAILED, plus SUSPICIOUS_TRANSACTION when this is the
+        Nth failure for this user within a short window — see the
+        "suspicious-transaction logging" note in audit_service.py. An
+        open merchant request with no customer yet (user_id is None) has
+        nothing to count against, so it's skipped rather than logged
+        under a null identity."""
+        audit = AuditService(self.db)
+        audit.log("PAYMENT_FAILED", user_id=user_id, transaction_id=transaction_id, status=status)
+        if user_id is None:
+            return
+
+        recent_failures = await audit.count_recent("PAYMENT_FAILED", user_id, _SUSPICIOUS_FAILURE_WINDOW_SECONDS)
+        if recent_failures >= _SUSPICIOUS_FAILURE_THRESHOLD:
+            audit.log(
+                "SUSPICIOUS_TRANSACTION",
+                user_id=user_id,
+                reason="repeated_payment_failures",
+                failure_count=recent_failures,
+                window_seconds=_SUSPICIOUS_FAILURE_WINDOW_SECONDS,
+            )
 
     async def _find_by_idempotency_key(self, idempotency_key: str) -> Transaction | None:
         existing = await self.db.execute(

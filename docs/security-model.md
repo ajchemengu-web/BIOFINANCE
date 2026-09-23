@@ -49,7 +49,8 @@ Replaces the open-claim gap above with an STK-Push-style flow, keyed on the BioF
 - **Mandatory idempotency keys on payment creation — wired** (`Idempotency-Key` header, both payment-creation endpoints, since Phase 3).
 - **Basic rate limiting — partially wired.** The `bio_id_code`-targeted path of `POST /payments/request` is rate-limited (`app/core/rate_limit.py`, see "BioFinance ID push pairing" above); general payment creation (customer-initiated `POST /payments`, or an open merchant request) isn't.
 - **Device verification — partially wired.** `merchant_devices` enforcement (above) verifies the *merchant's* device on `POST /payments/request`; there's no equivalent check on the *customer* side (`POST /payments`, `claim`) — a customer's `devices` table entries (BioFinance ID push pairing) are used for push delivery, not as an authorization gate.
-- **Not wired**: suspicious-transaction logging, repeated-biometric-failure detection — `audit_events` (below) now exists as the raw material either would consume, but no detection/alerting logic is built on top of it.
+- **Suspicious-transaction logging — wired, narrowly.** `PaymentService._log_payment_failed` logs `SUSPICIOUS_TRANSACTION` (metadata `reason: "repeated_payment_failures"`) once a user hits 3 `PAYMENT_FAILED` events within a 10-minute window (`_SUSPICIOUS_FAILURE_THRESHOLD`/`_SUSPICIOUS_FAILURE_WINDOW_SECONDS`) — a fixed count/window rule built on the audit trail below, not statistical or behavioral modeling (that's the explicitly-deferred item just below). Detection only, no consequence attached yet (no account lock, no alert, no rate-limit tightening) — logging the pattern, not yet acting on it.
+- **Repeated-biometric-failure detection — not wired, and can't be without contradicting this doc's own principles.** There is no backend signal: biometric failures never reach the backend at all (client-side only, above), so there is nothing to count. The suspicious-transaction check above is the closest available analogue — payment failures are a backend-visible proxy for "something about this session keeps not working" — but it is not the same signal and this doc doesn't pretend otherwise.
 - Explicitly deferred: behavioral anomaly detection, ML-based risk scoring, device fingerprinting beyond the basic `device_identifier`, merchant risk scoring.
 
 ## Audit logging
@@ -68,9 +69,12 @@ PAYMENT_CREATED        PAYMENT_AUTHORIZED     — wired (app/services/payment_se
 PAYMENT_COMPLETED      PAYMENT_FAILED         — wired, including the async Daraja-callback path
                                                  (handle_daraja_callback), not just the synchronous mock-provider one
 BIOID_LOCKED                                  — wired (app/api/bioid.py)
+SUSPICIOUS_TRANSACTION                        — wired, not in the original list — see "Fraud protection" above
 ```
 
 **`BIOMETRIC_SUCCESS`/`BIOMETRIC_FAILED` are deliberately not wired.** Biometric authentication happens entirely client-side (this doc, above: "raw biometric data never leaves the device") — there is no backend signal to log. The only way to produce one would be a new endpoint where the Flutter client reports its own biometric outcome, which is exactly the self-report this doc already rules out relying on ("the Flutter client is never trusted to self-report 'biometric succeeded' without a corresponding server-verifiable session state"). A future version could log it as clearly-labeled client telemetry, distinct from any authorization signal — not built this pass.
+
+**`GET /audit-events`** returns the caller's own events, newest first, `?limit=` capped at 200 (default 50) — a user's own activity/security log, not an admin view. There is no admin/role concept anywhere in this app, and this endpoint doesn't invent one: it can only ever answer "what happened on my account." A broader operational view (across all users, for support/fraud-ops tooling) would need that role concept built first — not done.
 
 `metadata` (jsonb) on each event never contains secrets or raw biometric data — reference IDs and statuses only (transaction ids, provider codes, routing mode, etc.), matching every event wired above.
 

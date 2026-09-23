@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    audit,
     auth,
     balances,
     bioid,
@@ -35,6 +36,7 @@ app.add_middleware(
 
 api_prefix = "/api/v1"
 app.include_router(auth.router, prefix=api_prefix)
+app.include_router(audit.router, prefix=api_prefix)
 app.include_router(bioid.router, prefix=api_prefix)
 app.include_router(devices.router, prefix=api_prefix)
 app.include_router(provider_catalog.router, prefix=api_prefix)
