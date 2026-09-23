@@ -49,6 +49,23 @@ class DeviceService:
         await self.db.refresh(device)
         return device
 
+    async def revoke(self, user_id: uuid.UUID, device_id: uuid.UUID) -> Device | None:
+        """DELETE /devices/{id} — returns None if the device doesn't exist
+        or isn't this user's (API layer maps both to 404, same as
+        disconnect_provider). Clears push_token too: a REVOKED device
+        should never be a push target again (docs/security-model.md,
+        "revoke it ... on ... explicit device removal")."""
+        device = await self.db.get(Device, device_id)
+        if device is None or device.user_id != user_id:
+            return None
+
+        device.status = "REVOKED"
+        device.push_token = None
+        AuditService(self.db).log("DEVICE_REMOVED", user_id=user_id, device_identifier=device.device_identifier)
+        await self.db.commit()
+        await self.db.refresh(device)
+        return device
+
     async def list_push_tokens(self, user_id: uuid.UUID) -> list[str]:
         """Every ACTIVE device's push token for a user (BioFinance ID push
         pairing sends to all of them — a customer may have more than one)."""

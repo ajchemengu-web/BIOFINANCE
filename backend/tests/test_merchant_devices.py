@@ -82,3 +82,58 @@ def test_register_device_rejects_a_customer_token(client):
         headers=_auth_headers(customer_token),
     )
     assert response.status_code == 401
+
+
+def test_revoked_device_fails_require_registered(client):
+    """The actual point of revocation: a revoked terminal must no longer
+    pass POST /payments/request's device check, even with a valid
+    merchant token — exercised via MerchantDeviceService.require_registered
+    directly since that's the only current consumer."""
+    token = _register_merchant(client)
+    device_identifier = uuid.uuid4().hex
+    register_response = client.post(
+        "/api/v1/merchant-devices/register",
+        json={"device_identifier": device_identifier},
+        headers=_auth_headers(token),
+    )
+    device_id = register_response.json()["id"]
+
+    revoke_response = client.delete(f"/api/v1/merchant-devices/{device_id}", headers=_auth_headers(token))
+    assert revoke_response.status_code == 204
+
+    import asyncio
+
+    import jwt as pyjwt
+    import pytest
+
+    from app.db.database import async_session_factory
+    from app.services.merchant_device_service import MerchantDeviceService
+
+    merchant_id = uuid.UUID(pyjwt.decode(token, options={"verify_signature": False})["sub"])
+
+    async def _check():
+        async with async_session_factory() as session:
+            await MerchantDeviceService(session).require_registered(merchant_id, device_identifier)
+
+    with pytest.raises(PermissionError):
+        asyncio.run(_check())
+
+
+def test_revoke_device_requires_ownership(client):
+    token_a = _register_merchant(client)
+    token_b = _register_merchant(client)
+    register_response = client.post(
+        "/api/v1/merchant-devices/register",
+        json={"device_identifier": uuid.uuid4().hex},
+        headers=_auth_headers(token_a),
+    )
+    device_id = register_response.json()["id"]
+
+    response = client.delete(f"/api/v1/merchant-devices/{device_id}", headers=_auth_headers(token_b))
+    assert response.status_code == 404
+
+
+def test_revoke_nonexistent_device_returns_404(client):
+    token = _register_merchant(client)
+    response = client.delete(f"/api/v1/merchant-devices/{uuid.uuid4()}", headers=_auth_headers(token))
+    assert response.status_code == 404

@@ -26,7 +26,7 @@ One-to-one with `users`. The provider-independent identity (e.g. `BF-8X7K29`). N
 | created_at | timestamptz | |
 
 ### devices
-Devices authorized to authenticate on behalf of a user (device binding, §37). Wired via `POST /devices/register` (upserts on `user_id` + `device_identifier`) — see `docs/roadmap.md` Phase 5, BioFinance ID push pairing.
+Devices authorized to authenticate on behalf of a user (device binding, §37). Wired via `POST /devices/register` (upserts on `user_id` + `device_identifier`) and `DELETE /devices/{id}` (revokes, clears `push_token`) — see `docs/roadmap.md` Phase 5, BioFinance ID push pairing.
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |
@@ -94,7 +94,7 @@ One per user. Drives BioRouter (§22-23).
 | created_at | timestamptz | |
 
 ### merchant_devices
-Only registered merchant devices may initiate production payment requests (§33) — enforced: `POST /payments/request` requires a `Device-Identifier` header naming a row here (`merchant_id` + `device_identifier`, `status = ACTIVE`) for the authenticated merchant, 403 otherwise (`app/services/merchant_device_service.py`). Wired via `POST /merchant-devices/register` (self-service, upserts on `merchant_id` + `device_identifier` — no unique DB constraint, application-level find-or-create, same pattern as the customer-side `devices` table).
+Only registered merchant devices may initiate production payment requests (§33) — enforced: `POST /payments/request` requires a `Device-Identifier` header naming a row here (`merchant_id` + `device_identifier`, `status = ACTIVE`) for the authenticated merchant, 403 otherwise (`app/services/merchant_device_service.py`). Wired via `POST /merchant-devices/register` (self-service, upserts on `merchant_id` + `device_identifier` — no unique DB constraint, application-level find-or-create, same pattern as the customer-side `devices` table) and `DELETE /merchant-devices/{id}` (revokes — a `REVOKED` row immediately fails the `require_registered` check above, the actual mechanism for deactivating a lost/stolen POS terminal).
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |

@@ -20,6 +20,7 @@ Base path: `/api/v1`. All authenticated endpoints require a bearer access token 
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | POST | `/devices/register` | authenticated; upserts on (`user_id`, `device_identifier`) — updates `push_token`/`platform` on re-registration rather than creating a duplicate row. `push_token`/`platform` are optional (a device with no push permission yet can still register). Wires the previously-unused `devices` table (§37). | done |
+| DELETE | `/devices/{id}` | authenticated as the owning user (404 otherwise); marks the device `REVOKED` and clears its `push_token` — it immediately drops out of BioFinance ID push pairing's push targets. Logs `DEVICE_REMOVED`. | done |
 
 ## Provider Catalog
 | Method | Path | Purpose | Status |
@@ -74,6 +75,7 @@ Merchant tokens are structurally distinct from customer (`users`) tokens — sam
 | Method | Path | Purpose | Status |
 |---|---|---|---|
 | POST | `/merchant-devices/register` | authenticated as the merchant; upserts on (`merchant_id`, `device_identifier`) — re-registering re-activates rather than erroring. Wires the previously-unused `merchant_devices` table (§33). Self-service, same trust model as `POST /devices/register` on the customer side. | done |
+| DELETE | `/merchant-devices/{id}` | authenticated as the owning merchant (404 otherwise); marks the device `REVOKED` — it immediately fails `require_registered`, so `POST /payments/request` from it 403s even with a valid merchant token. The actual mechanism for deactivating a lost/stolen POS terminal. | done |
 
 The device-level counterpart to merchant authentication — a merchant token proves *which merchant*, `Device-Identifier` on `POST /payments/request` (checked against this table) proves *which terminal*. A merchant with no registered device can authenticate but can't open a payment request until it registers one.
 

@@ -40,6 +40,21 @@ class MerchantDeviceService:
         await self.db.refresh(device)
         return device
 
+    async def revoke(self, merchant_id: uuid.UUID, device_id: uuid.UUID) -> MerchantDevice | None:
+        """DELETE /merchant-devices/{id} — returns None if the device
+        doesn't exist or isn't this merchant's. A revoked terminal
+        immediately fails require_registered below (status != ACTIVE), so
+        this is the actual mechanism for deactivating a lost/stolen POS
+        device, not just bookkeeping."""
+        device = await self.db.get(MerchantDevice, device_id)
+        if device is None or device.merchant_id != merchant_id:
+            return None
+
+        device.status = "REVOKED"
+        await self.db.commit()
+        await self.db.refresh(device)
+        return device
+
     async def require_registered(self, merchant_id: uuid.UUID, device_identifier: str) -> None:
         """Raises PermissionError (mapped to 403 by the API layer) if this
         device isn't a registered, ACTIVE terminal for this merchant."""
