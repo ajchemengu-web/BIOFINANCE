@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.models.routing_policy import RoutingPolicy
 from app.models.user import User
 from app.schemas.routing import RoutingPolicyResponse, RoutingPolicyUpdate
+from app.services.audit_service import AuditService
 
 router = APIRouter(prefix="/routing-policy", tags=["routing"])
 
@@ -39,6 +40,13 @@ async def update_routing_policy(
     policy.mode = payload.mode
     policy.primary_provider_id = payload.primary_provider_id
     policy.fallback_provider_id = payload.fallback_provider_id
+    AuditService(db).log(
+        "ROUTING_CHANGED",
+        user_id=user.id,
+        mode=payload.mode,
+        primary_provider_id=str(payload.primary_provider_id) if payload.primary_provider_id else None,
+        fallback_provider_id=str(payload.fallback_provider_id) if payload.fallback_provider_id else None,
+    )
     await db.commit()
     await db.refresh(policy)
     return policy

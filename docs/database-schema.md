@@ -130,13 +130,15 @@ One transaction can have multiple attempts across providers (fallback routing, �
 | created_at | timestamptz | |
 
 ### audit_events
-Append-only security/event log (§39).
+Append-only security/event log (§39). Wired via `app/services/audit_service.py`, staged (`db.add`, no commit of its own) so each event lands in the same transaction as whatever it's auditing.
 | column | type | notes |
 |---|---|---|
 | id | uuid, pk | |
 | user_id | uuid, fk → users, nullable | |
-| event_type | text | `LOGIN_SUCCESS`, `BIOMETRIC_FAILED`, `PAYMENT_COMPLETED`, ... |
-| metadata | jsonb | no raw secrets, no raw biometric data |
+| event_type | text | `LOGIN_SUCCESS`, `LOGIN_FAILED`, `DEVICE_REGISTERED`, `PROVIDER_CONNECTED`, `PROVIDER_DISCONNECTED`, `ROUTING_CHANGED`, `PAYMENT_CREATED`, `PAYMENT_AUTHORIZED`, `PAYMENT_COMPLETED`, `PAYMENT_FAILED`, `BIOID_LOCKED` — all wired. `BIOMETRIC_SUCCESS`/`BIOMETRIC_FAILED` and `DEVICE_REMOVED` are documented but not wired — no backend signal exists for the former (biometric auth is entirely client-side, docs/security-model.md), and no device-removal endpoint exists yet for the latter. |
+| metadata | jsonb | no raw secrets, no raw biometric data — reference IDs and statuses only (e.g. `transaction_id`, `provider_code`, `mode`) |
+
+No read endpoint exists yet — this pass only wires the write side (the documented requirement); consuming the trail is a future admin/ops concern, not built.
 | created_at | timestamptz | |
 
 ### notifications

@@ -5,6 +5,7 @@ from app.core.deps import get_current_user
 from app.db.database import get_db
 from app.models.user import User
 from app.schemas.bioid import BioIDResponse
+from app.services.audit_service import AuditService
 from app.services.bioid_service import BioIDService
 
 router = APIRouter(prefix="/bioid", tags=["bioid"])
@@ -33,4 +34,6 @@ async def lock_bioid(user: User = Depends(get_current_user), db: AsyncSession = 
     bio_id = await service.get_for_user(user.id)
     if bio_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No BioID issued for this user")
-    return await service.lock(bio_id)
+
+    AuditService(db).log("BIOID_LOCKED", user_id=user.id, bio_id=str(bio_id.id))
+    return await service.lock(bio_id)  # lock() commits, carrying the staged audit row with it

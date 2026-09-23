@@ -35,6 +35,7 @@ from app.models.merchant import Merchant
 from app.models.provider import ProviderAccount, ProviderConnection
 from app.models.routing_policy import RoutingPolicy
 from app.models.transaction import PaymentAttempt, Transaction
+from app.services.audit_service import AuditService
 from app.services.device_service import DeviceService
 from app.services.push_service import PushService
 from app.services.router_service import RouterService
@@ -78,6 +79,9 @@ class PaymentService:
         )
         self.db.add(transaction)
         await self.db.flush()
+        audit = AuditService(self.db)
+        audit.log("PAYMENT_CREATED", user_id=user_id, transaction_id=str(transaction.id), merchant_id=str(merchant_id))
+        audit.log("PAYMENT_AUTHORIZED", user_id=user_id, transaction_id=str(transaction.id))
 
         return await self._route_and_resolve(transaction, user_id)
 
@@ -125,6 +129,13 @@ class PaymentService:
             idempotency_key=idempotency_key,
         )
         self.db.add(transaction)
+        await self.db.flush()
+        AuditService(self.db).log(
+            "PAYMENT_CREATED",
+            user_id=target_bio_id.user_id if target_bio_id else None,
+            transaction_id=str(transaction.id),
+            merchant_id=str(merchant_id),
+        )
         await self.db.commit()
         await self.db.refresh(transaction)
 
@@ -190,6 +201,7 @@ class PaymentService:
             transaction.bio_id = bio_id.id
 
         transaction.status = "AUTHENTICATED"
+        AuditService(self.db).log("PAYMENT_AUTHORIZED", user_id=user_id, transaction_id=str(transaction.id))
         await self.db.flush()
 
         return await self._route_and_resolve(transaction, user_id)
@@ -202,6 +214,9 @@ class PaymentService:
 
         if policy is None:
             transaction.status = "PROVIDER_UNAVAILABLE"
+            AuditService(self.db).log(
+                "PAYMENT_FAILED", user_id=user_id, transaction_id=str(transaction.id), status=transaction.status
+            )
             await self.db.commit()
             await self.db.refresh(transaction)
             return transaction
@@ -252,6 +267,20 @@ class PaymentService:
         else:
             transaction.status = "DECLINED"
 
+        if transaction.status == "COMPLETED":
+            AuditService(self.db).log(
+                "PAYMENT_COMPLETED",
+                user_id=user_id,
+                transaction_id=str(transaction.id),
+                provider=transaction.selected_provider,
+            )
+        elif transaction.status in ("PROVIDER_UNAVAILABLE", "DECLINED"):
+            AuditService(self.db).log(
+                "PAYMENT_FAILED", user_id=user_id, transaction_id=str(transaction.id), status=transaction.status
+            )
+        # AUTHORIZATION_PENDING (Daraja in flight) logs nothing yet — the
+        # eventual outcome is logged by handle_daraja_callback below.
+
         await self.db.commit()
         await self.db.refresh(transaction)
         return transaction
@@ -280,12 +309,27 @@ class PaymentService:
 
         attempt.result = "SUCCESS" if result_code == 0 else "DECLINED"
 
+        # transaction.bio_id is always set by the time a transaction can
+        # reach AUTHORIZATION_PENDING (both create_payment and
+        # claim_payment_request set it before routing) — resolved here
+        # rather than threaded through as a param, since this is the only
+        # caller of handle_daraja_callback and it's a low-frequency webhook,
+        # not a hot path.
+        bio_id_row = await self.db.get(BioID, transaction.bio_id) if transaction.bio_id else None
+        user_id = bio_id_row.user_id if bio_id_row else None
+
         if result_code == 0:
             transaction.status = "COMPLETED"
             transaction.selected_provider = attempt.provider_code
             transaction.completed_at = datetime.now(timezone.utc)
+            AuditService(self.db).log(
+                "PAYMENT_COMPLETED", user_id=user_id, transaction_id=str(transaction.id), provider=attempt.provider_code
+            )
         else:
             transaction.status = "DECLINED"
+            AuditService(self.db).log(
+                "PAYMENT_FAILED", user_id=user_id, transaction_id=str(transaction.id), status=transaction.status
+            )
 
         await self.db.commit()
         await self.db.refresh(transaction)

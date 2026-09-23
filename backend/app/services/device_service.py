@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.device import Device
+from app.services.audit_service import AuditService
 
 
 class DeviceService:
@@ -32,6 +33,7 @@ class DeviceService:
             )
         )
         device = result.scalar_one_or_none()
+        is_new = device is None
         if device is None:
             device = Device(user_id=user_id, device_identifier=device_identifier)
             self.db.add(device)
@@ -39,6 +41,10 @@ class DeviceService:
         device.push_token = push_token
         device.platform = platform
         device.status = "ACTIVE"
+        if is_new:
+            # Only on first registration, not every push-token refresh —
+            # a re-registration isn't a new event worth an audit row.
+            AuditService(self.db).log("DEVICE_REGISTERED", user_id=user_id, device_identifier=device_identifier)
         await self.db.commit()
         await self.db.refresh(device)
         return device

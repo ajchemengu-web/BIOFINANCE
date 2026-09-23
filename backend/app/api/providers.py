@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.models.provider import ProviderAccount, ProviderConnection
 from app.models.user import User
 from app.schemas.providers import ProviderConnectionResponse, ProviderConnectRequest
+from app.services.audit_service import AuditService
 from app.services.payment_service import PaymentService
 from app.services.provider_catalog_service import ProviderCatalogService
 
@@ -50,6 +51,7 @@ async def connect_provider(
             external_account_ref=payload.external_account_ref,
         )
     )
+    AuditService(db).log("PROVIDER_CONNECTED", user_id=user.id, connection_id=str(connection.id), provider_code=payload.provider_code)
     await db.commit()
     await db.refresh(connection)
     return connection
@@ -65,6 +67,9 @@ async def disconnect_provider(
     if connection is None or connection.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Provider connection not found")
     connection.status = "DISCONNECTED"
+    AuditService(db).log(
+        "PROVIDER_DISCONNECTED", user_id=user.id, connection_id=str(connection.id), provider_code=connection.provider_code
+    )
     await db.commit()
 
 

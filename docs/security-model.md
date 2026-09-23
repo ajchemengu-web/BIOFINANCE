@@ -50,20 +50,27 @@ Replaces the open-claim gap above with an STK-Push-style flow, keyed on the BioF
 
 ## Audit logging
 
-Append-only `audit_events` table. Minimum event set to implement as features land:
+Append-only `audit_events` table, wired (`app/services/audit_service.py`) — the table existed since the first migration but nothing wrote to it until now.
 
 ```
-LOGIN_SUCCESS          LOGIN_FAILED
-BIOMETRIC_SUCCESS      BIOMETRIC_FAILED
-DEVICE_REGISTERED      DEVICE_REMOVED
-PROVIDER_CONNECTED     PROVIDER_DISCONNECTED
-ROUTING_CHANGED
-PAYMENT_CREATED        PAYMENT_AUTHORIZED
-PAYMENT_COMPLETED      PAYMENT_FAILED
-BIOID_LOCKED
+LOGIN_SUCCESS          LOGIN_FAILED           — wired (app/api/auth.py)
+BIOMETRIC_SUCCESS      BIOMETRIC_FAILED       — not wired, see below
+DEVICE_REGISTERED      DEVICE_REMOVED         — DEVICE_REGISTERED wired (app/services/device_service.py, once per
+                                                 new device, not on every push-token refresh); DEVICE_REMOVED not
+                                                 wired, no removal endpoint exists yet
+PROVIDER_CONNECTED     PROVIDER_DISCONNECTED  — wired (app/api/providers.py)
+ROUTING_CHANGED                               — wired (app/api/routing.py)
+PAYMENT_CREATED        PAYMENT_AUTHORIZED     — wired (app/services/payment_service.py, both payment-creation paths)
+PAYMENT_COMPLETED      PAYMENT_FAILED         — wired, including the async Daraja-callback path
+                                                 (handle_daraja_callback), not just the synchronous mock-provider one
+BIOID_LOCKED                                  — wired (app/api/bioid.py)
 ```
 
-`metadata` (jsonb) on each event must never contain secrets or raw biometric data — reference IDs only.
+**`BIOMETRIC_SUCCESS`/`BIOMETRIC_FAILED` are deliberately not wired.** Biometric authentication happens entirely client-side (this doc, above: "raw biometric data never leaves the device") — there is no backend signal to log. The only way to produce one would be a new endpoint where the Flutter client reports its own biometric outcome, which is exactly the self-report this doc already rules out relying on ("the Flutter client is never trusted to self-report 'biometric succeeded' without a corresponding server-verifiable session state"). A future version could log it as clearly-labeled client telemetry, distinct from any authorization signal — not built this pass.
+
+`metadata` (jsonb) on each event never contains secrets or raw biometric data — reference IDs and statuses only (transaction ids, provider codes, routing mode, etc.), matching every event wired above.
+
+No endpoint reads `audit_events` yet — this closes the write side the PRD requires; consuming the trail (an admin view, alerting, the "repeated-biometric-failure detection" and "suspicious-transaction logging" under Fraud protection below) is unbuilt follow-up work, not in scope here.
 
 ## Regulatory posture
 

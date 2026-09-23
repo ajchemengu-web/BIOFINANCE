@@ -13,6 +13,7 @@ from app.core.security import (
 from app.db.database import get_db
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenResponse
+from app.services.audit_service import AuditService
 from app.services.bioid_service import BioIDService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -46,7 +47,17 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
+        # Only logged when the email matches a real user — no user_id to
+        # attach an audit row to for an unknown email, and we don't want a
+        # PII-keyed trail of guessed addresses (docs/security-model.md,
+        # "reference IDs only").
+        if user is not None:
+            AuditService(db).log("LOGIN_FAILED", user_id=user.id)
+            await db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+
+    AuditService(db).log("LOGIN_SUCCESS", user_id=user.id)
+    await db.commit()
 
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
