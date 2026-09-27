@@ -6,9 +6,26 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
+import 'package:biopos/core/storage/secure_storage.dart';
 import 'package:biopos/main.dart';
 
 const _apiBase = 'http://localhost:8000/api/v1';
+
+/// No platform channel in the widget-test harness would ever answer
+/// flutter_secure_storage's real plugin — stands in for "empty local
+/// storage", the same override mobile/'s equivalent test uses.
+class _InMemoryTokenStorage implements TokenStorage {
+  final _store = <String, String>{};
+
+  @override
+  Future<void> write(String key, String value) async => _store[key] = value;
+
+  @override
+  Future<String?> read(String key) async => _store[key];
+
+  @override
+  Future<void> delete(String key) async => _store.remove(key);
+}
 
 /// Stands in for "the customer, on their own device, running mobile/" —
 /// raw HTTP against the same backend, deliberately not going through
@@ -64,10 +81,22 @@ void main() {
       // multiple runAsync calls, or letting any of it fire outside one,
       // leaves those calls/timers orphaned and nothing ever resolves.
       await tester.runAsync(() async {
-        await tester.pumpWidget(const ProviderScope(child: BioPosApp()));
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [secureStorageProvider.overrideWithValue(_InMemoryTokenStorage())],
+            child: const BioPosApp(),
+          ),
+        );
         await tester.pump();
 
-        await tester.enterText(find.byType(TextFormField), 'Test Shop');
+        // Unique email so re-runs against the same backend don't collide —
+        // real merchant credentials now (docs/roadmap.md Phase 5), not the
+        // old "POST /merchants creates a fresh row every time" shortcut.
+        final email = 'biopos-merchant-${DateTime.now().millisecondsSinceEpoch}@biofinance.dev';
+        final fields = find.byType(TextFormField);
+        await tester.enterText(fields.at(0), 'Test Shop');
+        await tester.enterText(fields.at(1), email);
+        await tester.enterText(fields.at(2), 'password123');
         await tester.tap(find.text('Sign in'));
         await tester.pump();
         await Future.delayed(const Duration(seconds: 2));

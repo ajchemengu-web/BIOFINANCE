@@ -23,11 +23,20 @@ class PaymentRequestsRepository {
 
   final ApiClient _apiClient;
 
-  Future<PaymentRequestResult> create({required String merchantId, required double amount}) async {
+  /// merchant_id is no longer sent here — the backend derives it from the
+  /// merchant's own bearer token (ApiClient attaches it automatically once
+  /// signed in). deviceIdentifier must be one this merchant has registered
+  /// via POST /merchant-devices/register (docs/roadmap.md Phase 5,
+  /// "merchant_devices enforcement") — the caller gets it from
+  /// merchantDeviceIdentifierProvider.
+  Future<PaymentRequestResult> create({required String deviceIdentifier, required double amount}) async {
     final json = await _apiClient.post(
       '/payments/request',
-      body: {'merchant_id': merchantId, 'amount': amount.toStringAsFixed(2), 'currency': 'KES'},
-      headers: {'Idempotency-Key': _generateIdempotencyKey()},
+      body: {'amount': amount.toStringAsFixed(2), 'currency': 'KES'},
+      headers: {
+        'Idempotency-Key': _generateIdempotencyKey(),
+        'Device-Identifier': deviceIdentifier,
+      },
     ) as Map<String, dynamic>;
     return PaymentRequestResult.fromJson(json);
   }
@@ -37,6 +46,9 @@ class PaymentRequestsRepository {
     return PaymentRequestResult.fromJson(json);
   }
 
+  /// Now requires the owning merchant's bearer token too (docs/roadmap.md
+  /// Phase 5) — no header change needed here, ApiClient attaches it
+  /// automatically for every request once signed in.
   Future<PaymentRequestResult> cancel(String paymentId) async {
     final json = await _apiClient.post('/payments/$paymentId/cancel') as Map<String, dynamic>;
     return PaymentRequestResult.fromJson(json);

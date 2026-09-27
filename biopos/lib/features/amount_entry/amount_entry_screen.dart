@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/errors/app_exception.dart';
 import '../../repositories/payment_requests_repository.dart';
 import '../merchant_auth/merchant_auth_providers.dart';
+import '../merchant_auth/merchant_device_providers.dart';
+import '../merchant_auth/merchant_profile_providers.dart';
 import '../payment/waiting_screen.dart';
 
 /// Merchant enters an amount and opens a payment request (PRD §32) via
@@ -28,15 +30,18 @@ class _AmountEntryScreenState extends ConsumerState<AmountEntryScreen> {
 
   Future<void> _requestPayment() async {
     if (!_formKey.currentState!.validate()) return;
-    final merchantId = ref.read(merchantAuthProvider).merchantId;
-    if (merchantId == null) return;
 
     setState(() => _submitting = true);
     try {
+      // Device-Identifier is required now (merchant_devices enforcement,
+      // docs/roadmap.md Phase 5) — this terminal registered itself on
+      // sign-in (merchantDeviceIdentifierProvider), so this just awaits
+      // that same in-flight/cached future rather than re-registering.
+      final deviceIdentifier = await ref.read(merchantDeviceIdentifierProvider.future);
       final amount = double.parse(_amountController.text);
       final request = await ref
           .read(paymentRequestsRepositoryProvider)
-          .create(merchantId: merchantId, amount: amount);
+          .create(deviceIdentifier: deviceIdentifier, amount: amount);
 
       if (!mounted) return;
       setState(() => _submitting = false);
@@ -58,7 +63,7 @@ class _AmountEntryScreenState extends ConsumerState<AmountEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final merchant = ref.watch(merchantAuthProvider);
+    final merchantAsync = ref.watch(merchantProfileProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -80,10 +85,14 @@ class _AmountEntryScreenState extends ConsumerState<AmountEntryScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  merchant.businessName ?? '',
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
+                merchantAsync.when(
+                  data: (merchant) => Text(
+                    merchant.businessName,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, __) => const SizedBox.shrink(),
                 ),
                 const SizedBox(height: 32),
                 TextFormField(

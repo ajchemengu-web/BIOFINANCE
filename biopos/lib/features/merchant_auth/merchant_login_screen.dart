@@ -13,16 +13,24 @@ class MerchantLoginScreen extends ConsumerStatefulWidget {
 class _MerchantLoginScreenState extends ConsumerState<MerchantLoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _businessNameController = TextEditingController(text: 'Java House');
+  final _emailController = TextEditingController(text: 'merchant@biofinance.dev');
+  final _passwordController = TextEditingController(text: 'password123');
 
   @override
   void dispose() {
     _businessNameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    await ref.read(merchantAuthProvider.notifier).signIn(_businessNameController.text);
+    await ref.read(merchantAuthProvider.notifier).signIn(
+          _businessNameController.text,
+          _emailController.text,
+          _passwordController.text,
+        );
   }
 
   @override
@@ -62,6 +70,21 @@ class _MerchantLoginScreenState extends ConsumerState<MerchantLoginScreen> {
                     ),
                     validator: (value) => (value == null || value.isEmpty) ? 'Required' : null,
                   ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _emailController,
+                    decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()),
+                    validator: (value) =>
+                        (value == null || !value.contains('@')) ? 'Enter a valid email' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _passwordController,
+                    decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
+                    obscureText: true,
+                    validator: (value) =>
+                        (value == null || value.length < 6) ? 'At least 6 characters' : null,
+                  ),
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: session.isLoading ? null : _submit,
@@ -83,7 +106,7 @@ class _MerchantLoginScreenState extends ConsumerState<MerchantLoginScreen> {
                   ],
                   const SizedBox(height: 8),
                   Text(
-                    'Registers a merchant on sign-in — no real merchant login yet.',
+                    'New businesses are registered automatically on first sign-in.',
                     style: Theme.of(context).textTheme.bodySmall,
                     textAlign: TextAlign.center,
                   ),

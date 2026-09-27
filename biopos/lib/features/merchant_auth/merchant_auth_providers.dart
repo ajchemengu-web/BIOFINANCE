@@ -1,51 +1,42 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_exception.dart';
-import '../../repositories/merchants_repository.dart';
+import '../../services/merchant_auth_service.dart';
 
 class MerchantSession {
-  const MerchantSession({
-    this.isSignedIn = false,
-    this.isLoading = false,
-    this.error,
-    this.merchantId,
-    this.businessName,
-  });
+  const MerchantSession({this.isSignedIn = false, this.isLoading = false, this.error});
 
   final bool isSignedIn;
   final bool isLoading;
   final String? error;
-  final String? merchantId;
-  final String? businessName;
 
-  MerchantSession copyWith({bool? isLoading, String? error}) => MerchantSession(
-        isSignedIn: isSignedIn,
-        isLoading: isLoading ?? this.isLoading,
-        error: error,
-        merchantId: merchantId,
-        businessName: businessName,
-      );
+  MerchantSession copyWith({bool? isLoading, String? error}) =>
+      MerchantSession(isSignedIn: isSignedIn, isLoading: isLoading ?? this.isLoading, error: error);
 }
 
-/// Merchant "sign-in" is really just POST /merchants — there's no real
-/// merchant-auth endpoint yet (Merchant/MerchantDevice have no login;
-/// docs/roadmap.md Phase 5), so this creates a fresh Merchant row per
-/// sign-in rather than authenticating an existing one. Good enough to get
-/// a real merchant_id for payment requests; not real authentication.
+/// Session state backed by the real backend (POST /merchants/login, falling
+/// back to /merchants/register — see merchant_auth_service.dart). Mirrors
+/// mobile/lib/features/authentication/auth_providers.dart exactly: this
+/// only tracks whether a session exists, not the merchant's own profile —
+/// that's merchantProfileProvider (merchant_profile_providers.dart), fetched
+/// fresh once signed in, same shape as mobile/'s bioIdProvider.
 class MerchantAuthNotifier extends StateNotifier<MerchantSession> {
-  MerchantAuthNotifier(this._merchantsRepository) : super(const MerchantSession());
+  MerchantAuthNotifier(this._authService) : super(const MerchantSession()) {
+    _restoreSession();
+  }
 
-  final MerchantsRepository _merchantsRepository;
+  final MerchantAuthService _authService;
 
-  Future<void> signIn(String businessName) async {
+  Future<void> _restoreSession() async {
+    final token = await _authService.restoreSession();
+    if (token != null) state = const MerchantSession(isSignedIn: true);
+  }
+
+  Future<void> signIn(String businessName, String email, String password) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final merchant = await _merchantsRepository.create(businessName);
-      state = MerchantSession(
-        isSignedIn: true,
-        merchantId: merchant.id,
-        businessName: merchant.businessName,
-      );
+      await _authService.loginOrRegister(businessName, email, password);
+      state = const MerchantSession(isSignedIn: true);
     } on ApiException catch (e) {
       state = state.copyWith(isLoading: false, error: e.message);
     } catch (e) {
@@ -53,9 +44,12 @@ class MerchantAuthNotifier extends StateNotifier<MerchantSession> {
     }
   }
 
-  void signOut() => state = const MerchantSession();
+  Future<void> signOut() async {
+    await _authService.logout();
+    state = const MerchantSession();
+  }
 }
 
 final merchantAuthProvider = StateNotifierProvider<MerchantAuthNotifier, MerchantSession>(
-  (ref) => MerchantAuthNotifier(ref.watch(merchantsRepositoryProvider)),
+  (ref) => MerchantAuthNotifier(ref.watch(merchantAuthServiceProvider)),
 );

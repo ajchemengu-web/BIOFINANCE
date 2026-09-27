@@ -86,7 +86,7 @@ Today's merchant-initiated flow (`biopos/`) opens a request with no customer att
 
 Full design: `docs/api-spec.md` (Devices + updated Payments sections), `docs/database-schema.md` (`devices.push_token`/`platform`), `docs/security-model.md` ("BioFinance ID push pairing"), `docs/roadmap.md` Phase 5.
 
-## Merchant authentication and device enforcement (backend complete, `biopos/` not wired to it)
+## Merchant authentication and device enforcement (backend complete, `biopos/` wired but unverified)
 
 Mirrors customer auth (`POST /auth/register`/`login` → JWT) rather than inventing a second scheme, with one deliberate difference: a merchant's token carries `type: "merchant_access"`/`"merchant_refresh"` instead of `"access"`/`"refresh"` (`app/core/security.py`), so `get_current_merchant` (`app/core/deps.py`) and `get_current_user` reject each other's tokens structurally — a leaked merchant credential can't be replayed against a customer-scoped endpoint by construction, not by an endpoint remembering to check a role field.
 
@@ -95,7 +95,7 @@ Two layers, both now built:
 1. **Which merchant** — `POST /payments/request` and `POST /payments/{id}/cancel` both require a merchant token and take `merchant_id` from it, never from the request body. Closes the gap `docs/security-model.md` flagged ("anyone can currently open a payment request against any merchant ID").
 2. **Which device** — `POST /payments/request` also requires a `Device-Identifier` header naming a device that merchant registered via `POST /merchant-devices/register` (§33 of the source PRD), 403 otherwise, checked against the *authenticated* merchant's own devices specifically (a device registered to merchant A doesn't authorize merchant B, even with B's valid token). This is the same shape as the customer-side `devices` table/`POST /devices/register` from BioFinance ID push pairing — self-service registration, not an admin-provisioned allowlist, so it narrows "a leaked credential works from anywhere" to "a leaked credential works from a device someone registered with it," rather than eliminating the risk outright.
 
-`biopos/` isn't wired to either layer yet — its current code still creates a fresh unauthenticated `Merchant` row per sign-in and sends `merchant_id` in the request body, both of which the backend now rejects. Deferred, not silently broken (`docs/roadmap.md` Phase 5).
+`biopos/` is now wired to both layers: sign-in calls `POST /merchants/login`/`register` and stores the token (mirroring `mobile/`'s own login pattern), and the terminal registers a device identifier on first sign-in, sent as `Device-Identifier` on every `POST /payments/request`. No `flutter` binary was available to verify this with — `flutter analyze`/`flutter test` need to actually be run before trusting it (`docs/roadmap.md` Phase 5).
 
 ## Deployment target
 

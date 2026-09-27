@@ -41,6 +41,11 @@ dependencies:
   # Backend API client.
   http: ^1.2.2
 
+  # Secure local storage for the merchant session token and this terminal's
+  # device identifier (merchant_devices enforcement, docs/security-model.md
+  # "Merchant-side integrity") — matches mobile/'s dependency exactly.
+  flutter_secure_storage: ^9.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
